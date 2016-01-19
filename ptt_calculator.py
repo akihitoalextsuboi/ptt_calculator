@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scipy as sp
 import scipy.signal as signal
+import scipy.optimize as optimize
 import logging
 import sys
 import os
@@ -13,14 +14,16 @@ import re
 DATA_DIR = './csvs'
 DATA_DIR_2 = './csvs_concat'
 DATA_DIR_3 = './csvs_cut_by_time'
-DATA_DIR_4 = './csvs_wo_noise_2'
-DATA_DIR_4_2 = './csvs_wo_noise'
+DATA_DIR_4 = './csvs_wo_noise'
 DATA_DIR_5 = './csvs_normalized'
-DATA_DIR_6 = './csvs_selected_and_ecg_corrected'
-DATA_DIR_7 = './csvs_with_ptt'
+DATA_DIR_6 = './csvs_ecg_max_pls_min_ptt_pulse_wave_features'
+DATA_DIR_7 = './csvs_of_ptt'
 
-KETSUATSU_PTT_DIR = './ketsuatsu_ptt'
+DATA_DIR_8 = './csvs_ketsuatsu_ptt'
+DATA_DIR_9 = './csvs_b1_b2_rmse'
+# KETSUATSU_PTT_DIR = './ketsuatsu_ptt'
 KETSUATSU_DIR = './ketsuatsu'
+KETSUATSU_ORIGINAL_DIR = './ketsuatsu_backup_original'
 
 FILES = []
 
@@ -52,14 +55,14 @@ for file in os.listdir(DATA_DIR_3):
         CUT_BY_TIME_FILES.append(file)
 
 # no noise file 2
-WO_NOISE_FILES_2 = []
-for file in os.listdir(DATA_DIR_4):
-    if file.endswith('.csv'):
-        WO_NOISE_FILES_2.append(file)
+# WO_NOISE_FILES_2 = []
+# for file in os.listdir(DATA_DIR_4):
+#     if file.endswith('.csv'):
+#         WO_NOISE_FILES_2.append(file)
 
 # no noise file
 WO_NOISE_FILES = []
-for file in os.listdir(DATA_DIR_4_2):
+for file in os.listdir(DATA_DIR_4):
     if file.endswith('.csv'):
         WO_NOISE_FILES.append(file)
 
@@ -83,10 +86,10 @@ for file in os.listdir(KETSUATSU_DIR):
     if file.endswith('.csv'):
         KETSUATSU_FILES.append(file)
 
-KETSUATSU_PTT_FILES = []
-for file in os.listdir(KETSUATSU_PTT_DIR):
+FILES_8 = []
+for file in os.listdir(DATA_DIR_8):
     if file.endswith('.csv'):
-        KETSUATSU_PTT_FILES.append(file)
+        FILES_8.append(file)
     
 # Constants
 TIME = 'Time[s]'
@@ -108,6 +111,9 @@ DATETIME = 'Datetime'
 TIME_RANGE = 2000 #[ms]
 PAUSE_TIME = 0.1 #[s]
 DATA_COUNT = 20000 #[ms]
+
+# CutByTimeControllerの定数
+OFFSET_OF_MESUREMENT_TIME = 10 #[s]
 
 # NoiseCancelerの定数
 FFT_WINDOW_NUM = 100000 # TODO in fftでは2*n例えば1024や1024*2を用いると早い
@@ -232,8 +238,36 @@ class DataFrameController2:
         self.big_dataframe.index = date_range
         return self.big_dataframe
 
-    def create_new_csv(self):
+    def create_csv(self):
         self.big_dataframe.to_csv(DATA_DIR_2 + '/' + self.filename)
+        return
+
+class CutByTimeController:
+    def __init__(self, data):
+        self.data = data
+
+    def cut_by_time(self, filename):
+        date_string = pd.to_datetime(self.data.index[0]).strftime('%Y-%m-%d')
+        ketsuatsu = pd.read_csv(KETSUATSU_DIR + '/' + filename, header=None)
+        ketsuatsu.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW]
+        ketsuatsu[TIME] = date_string + ' ' + ketsuatsu[TIME]
+        start_time_index = ketsuatsu[TIME].iloc[0]
+        end_time_index = ketsuatsu[TIME].iloc[-1]
+        # ketsuatsu.index = pd.DatetimeIndex(ketsuatsu[TIME])
+        logging.debug('index: {0}'.format(start_time_index))
+        logging.debug('index: {0}'.format(end_time_index))
+        start_time = pd.to_datetime(start_time_index) - pd.tseries.offsets.Second(OFFSET_OF_MESUREMENT_TIME)
+        end_time = pd.to_datetime(end_time_index) + pd.tseries.offsets.Second(OFFSET_OF_MESUREMENT_TIME)
+        logging.debug('time: {0}'.format(start_time))
+        logging.debug('time: {0}'.format(end_time))
+        self.data.index = pd.to_datetime(self.data.index)
+        self.data = self.data[start_time:end_time].copy()
+        logging.debug('data: {0}'.format(self.data.head(1)))
+        logging.debug('data: {0}'.format(self.data.tail(1)))
+        return self.data
+
+    def create_csv(self, filename='default.csv'):
+        self.data.to_csv(DATA_DIR_3 + '/' + filename)
         return
 
 
@@ -293,6 +327,7 @@ class NoiseCanceler:
         self.data = data
 
     def cancel_noise(self, ecg_cutoff_frequency=ECG_CUTOFF_FREQUENCY, pls_cutoff_frequency=PLS_CUTOFF_FREQUENCY):
+        # only low pass filter
         length = self.data.shape[0]
         num = length / FFT_WINDOW_NUM + 1
         ecg_without_noise = []
@@ -316,9 +351,43 @@ class NoiseCanceler:
         self.data[PLS_WITHOUT_NOISE_2] = pls_without_noise
         return 
 
+    def cancel_noise_3(self):
+        # by butterworth filter, but not that good to me
+        SAMPLING_FREQUENCY = 1000
+        NYQUIST_FREQUENCY = float(0.5 * SAMPLING_FREQUENCY)
+        PASS_FREQUENCY = 0.5
+        ECG_STOP_FREQUENCY = ECG_CUTOFF_FREQUENCY
+        PLS_STOP_FREQUENCY = PLS_CUTOFF_FREQUENCY
+        gpass = 3
+        gstop = 40
+        # normalize
+        wp = PASS_FREQUENCY / NYQUIST_FREQUENCY
+        wp_ecg = ECG_STOP_FREQUENCY / NYQUIST_FREQUENCY
+        wp_pls = PLS_STOP_FREQUENCY / NYQUIST_FREQUENCY
+        ws = 0 
+        ws_ecg = (ECG_STOP_FREQUENCY + 1) / NYQUIST_FREQUENCY
+        ws_pls = (PLS_STOP_FREQUENCY + 1) / NYQUIST_FREQUENCY
+        n1, wn1 = signal.buttord([wp, wp_ecg], [ws, ws_ecg], gpass, gstop)
+        # b1, a1 = signal.butter(n1, wn1, 'bandpass')
+        b1, a1 = signal.butter(1, [wp, wp_ecg], btype='bandpass')
+        n2, wn2 = signal.buttord([wp, wp_pls], [ws, ws_pls], gpass, gstop)
+        # b2, a2 = signal.butter(n2, wn2, 'bandpass')
+        b2, a2 = signal.butter(1, [wp, wp_pls], btype='bandpass')
+        data1 = self.data[ECG].values
+        data2 = self.data[PLS].values
+
+        ecg_filtered = signal.lfilter(b1, a1, self.data[ECG].values)
+        pls_filtered = signal.lfilter(b2, a2, self.data[PLS].values)
+        self.data['ECG_FILTERD'] = ecg_filtered
+        self.data['PLS_FILTERD'] = pls_filtered
+        return self.data
+
     def cancel_noise_2(self):
+        # with highpass and lowpass filter
         # 0.5Hzでハイパス, ECG: 40Hz, PLS: 10Hz, でローパス
         FFT_WINDOW_NUM = 100000 # TODO in fftでは2*n例えば1024や1024*2を用いると早い
+        # FFT_WINDOW_NUMの値が悪いのでここで時間がかかることあり
+        # TODO 窓関数buttord filter等を使う
         ECG_LOW_CUTOFF_FREQUENCY = 0.5
         PLS_LOW_CUTOFF_FREQUENCY = 0.5
         SAMPLING_FREQUENCY = 1000
@@ -371,30 +440,36 @@ class DataNormalizer:
         self.data[[ECG_NORMALIZED, PLS_NORMALIZED]].to_csv(DATA_DIR_5 + '/' + filename)
         return
 
-class PTTCalculater:
+class PTTCalculator:
     def __init__(self, data):
         self.data = data
 
     def get_ecg_max_index(self):
-        # これを改良すればECGの逆位相は気にしなくて良くなる
-        # 一次微分の最大値の右側300[ms]以内
-        self.data[ECG_DIFF] = np.append(0, self.data[ECG_NORMALIZED].values[1:] - self.data[ECG_NORMALIZED].values[:-1])
-        # diff_max_index = signal.argrelmax(self.data[ECG_DIFF].values)[0] )
-        # np.array diff_max_index.
-        # しきい値は上から97%の所
-        ecg_threshold = self.data.quantile(.97)[0]
-        # しきい値以上またはしきい値以下
-        # self.data[ECG_SUPER] = self.data[ECG_NORMALIZED]
+        # ECGの逆位相は気にしない
+        self.data[ECG_DIFF] = self.data[ECG_NORMALIZED].diff()
 
-        # 最大値の変曲点でかつ閾値以上
-        data = self.data[ECG_NORMALIZED][ signal.argrelmax(self.data[ECG_NORMALIZED].values)[0] ]
-        data = data[data > ecg_threshold]
-        self.data[ECG_MAX] = data
+        # しきい値は上から97%の所 または 3%以下
+        ecg_threshold_max = self.data[ECG_NORMALIZED].quantile(.98)
+        ecg_threshold_min = self.data[ECG_NORMALIZED].quantile(.02)
+
+        # 最大値の変曲点でかつ閾値以上 または 最小値の変曲点でかつ閾値以下
+        if np.abs(ecg_threshold_max) > np.abs(ecg_threshold_min):
+            mask_max = signal.argrelmax(self.data[ECG_NORMALIZED].values)[0]
+            data_max = self.data[ECG_NORMALIZED][mask_max] 
+            data_max = data_max[data_max > ecg_threshold_max]
+            self.data[ECG_MAX] = data_max
+        else: 
+            mask_min = signal.argrelmin(self.data[ECG_NORMALIZED].values)[0]
+            data_min = self.data[ECG_NORMALIZED][mask_min]
+            data_min = data_min[data_min < ecg_threshold_min]
+            self.data[ECG_MAX] = data_min
+
+        logging.debug(self.data[ECG_MAX])
         return self.data
 
     def get_pls_min_index(self, pls_cutoff_frequency=PLS_SUPER_CUTOFF_FREQUENCY):
         # 3.5Hzでスムージングした曲線の最小値の+-200ms以内に最小値が存在する
-        MIN_POINTS_WINDOW = 200 #+-200[ms]以内
+        MIN_POINTS_WINDOW = 100 #+-100[ms]以内
         length = self.data.shape[0]
         num = length / FFT_WINDOW_NUM + 1
         pls_smooth = []
@@ -414,10 +489,10 @@ class PTTCalculater:
         min_point_indexes_of_smooth = signal.argrelmin(self.data['PLS(smooth)'].values)[0]
         min_indexes = []
         for index in min_point_indexes_of_smooth:
-            if index > 100:
-                min_index = self.data[PLS_NORMALIZED].iloc[index - 100:index + 100].argmin()
+            if index > MIN_POINTS_WINDOW:
+                min_index = self.data[PLS_NORMALIZED].iloc[index - MIN_POINTS_WINDOW:index + MIN_POINTS_WINDOW].argmin()
             else:
-                min_index = self.data[PLS_NORMALIZED].iloc[0:index + 100].argmin()
+                min_index = self.data[PLS_NORMALIZED].iloc[0:index + MIN_POINTS_WINDOW].argmin()
             min_indexes.append(min_index)
         min_indexes = pd.unique(min_indexes)
         self.data[PLS_MIN] = self.data[PLS_NORMALIZED][min_indexes]
@@ -426,24 +501,28 @@ class PTTCalculater:
 
     def get_ptt(self):
         # TODO pd.DataFrame.instance.set_indexを使うともっと簡潔に書ける
-        self.data['PTT(calculater)'] = np.NaN
+        self.data['PTT(calculater)'] = np.nan
         self.data.ix[self.data[PLS_MIN].notnull(), 'PTT(calculater)'] = 1
         self.data.ix[self.data[ECG_MAX].notnull(), 'PTT(calculater)'] = 0
-        ptt_calculater = pd.DataFrame(self.data['PTT(calculater)'].dropna())
-        logging.debug(ptt_calculater)
-        ptt_calculater_len = len(ptt_calculater)
-        ptt_calculater['PTT(TIME)'] = pd.to_datetime(ptt_calculater.index)
-        ptt_calculater.index = np.arange(ptt_calculater_len)
-        ptt_calculater_diff = ptt_calculater['PTT(calculater)'][1:].values - ptt_calculater['PTT(calculater)'][:-1].values
-        logging.debug(len(ptt_calculater_diff))
-        logging.debug(len(ptt_calculater[1:]))
-        ptt_calculater['PTT(calculater)'][1:] = ptt_calculater_diff
-        ptt_calculater_eq_1_index = ptt_calculater[ptt_calculater['PTT(calculater)'] == 1].index.values
-        ptt_calculater_eq_0_index = ptt_calculater_eq_1_index - 1
-        ptt_calculater[PTT] = np.nan
-        ptt_calculater[PTT][ptt_calculater_eq_1_index] = ptt_calculater['PTT(TIME)'][ptt_calculater_eq_1_index].values - ptt_calculater['PTT(TIME)'][ptt_calculater_eq_0_index].values
-        ptt_calculater.index = pd.Index(ptt_calculater['PTT(TIME)'])
-        not_null_ptt = ptt_calculater[PTT][ptt_calculater[PTT].notnull()]
+        ptt_calculator = pd.DataFrame(self.data['PTT(calculater)'].dropna())
+        logging.debug(ptt_calculator)
+        ptt_calculator_len = len(ptt_calculator)
+        ptt_calculator['PTT(TIME)'] = pd.to_datetime(ptt_calculator.index)
+        ptt_calculator['PTT(calculater-diff)'] = ptt_calculator['PTT(calculater)'].diff()
+
+        ptt_calculator.index = np.arange(ptt_calculator_len)
+        # ptt_calculator_diff = ptt_calculator['PTT(calculater)'][1:].values - ptt_calculator['PTT(calculater)'][:-1].values
+        # logging.debug(len(ptt_calculator_diff))
+        # logging.debug(len(ptt_calculator[1:]))
+        # ptt_calculator['PTT(calculater)'][1:] = ptt_calculator_diff
+
+        ptt_calculator_eq_1_index = ptt_calculator[ptt_calculator['PTT(calculater-diff)'] == 1].index.values
+        ptt_calculator_eq_0_index = ptt_calculator_eq_1_index - 1
+        ptt_calculator[PTT] = np.nan
+        ptt_calculator[PTT][ptt_calculator_eq_1_index] = ptt_calculator['PTT(TIME)'][ptt_calculator_eq_1_index].values - ptt_calculator['PTT(TIME)'][ptt_calculator_eq_0_index].values
+        # ptt_calculator.index = pd.Index(ptt_calculator['PTT(TIME)'])
+        ptt_calculator.index = ptt_calculator['PTT(TIME)']
+        not_null_ptt = ptt_calculator[PTT][ptt_calculator[PTT].notnull()]
         logging.debug('------------------\n')
         logging.debug(not_null_ptt)
         logging.debug('------------------\n')
@@ -452,9 +531,9 @@ class PTTCalculater:
         logging.debug('------------------\n')
         logging.debug(ptt_sec)
         logging.debug('------------------\n')
-        # ptt_milli = ptt_calculater[PTT].dt.components.milliseconds / 1000
-        # ptt_calculater[PTT] = ptt_sec
-        # self.data[PTT] = ptt_calculater[PTT]
+        # ptt_milli = ptt_calculator[PTT].dt.components.milliseconds / 1000
+        # ptt_calculator[PTT] = ptt_sec
+        # self.data[PTT] = ptt_calculator[PTT]
         logging.debug('------------------\n')
         logging.debug(type(self.data.index))
         logging.debug(type(ptt_sec.index))
@@ -467,14 +546,16 @@ class PTTCalculater:
         logging.debug('------------------\n')
         self.data[PTT] = ptt_sec
 
-        # ptt_calculater['PTT(TIME)'] = pd.to_datetime(ptt_calculater.index)
-        # ptt_calculater[PTT] = np.NaN
-        # ptt_calculater[PTT][1:] = ptt_calculater['PTT(TIME)'][1:].values - ptt_calculater['PTT(TIME)'][:-1].values
-        # self.data[PTT] = ptt_calculater[PTT]
+        # ptt_calculator['PTT(TIME)'] = pd.to_datetime(ptt_calculator.index)
+        # ptt_calculator[PTT] = np.NaN
+        # ptt_calculator[PTT][1:] = ptt_calculator['PTT(TIME)'][1:].values - ptt_calculator['PTT(TIME)'][:-1].values
+        # self.data[PTT] = ptt_calculator[PTT]
         # x = self.data[PTT]
         # xxx = x[x.notnull()]
         # self.data[PTT] = xxx.dt.components.milliseconds / 1001
-        self.data[PTT] = self.data[PTT][self.data[PTT] < 0.25]
+        # 0.01 < PTT < 0.2 のものは理論上不可能なので
+        self.data[PTT] = self.data[PTT][self.data[PTT] < 0.2]
+        self.data[PTT] = self.data[PTT][self.data[PTT] > 0.01]
         return self.data 
 
     def create_csv(self, filename='default.csv'):
@@ -482,8 +563,80 @@ class PTTCalculater:
 
     def draw_now(self):
         num = 1200000
-        rtd = RealTimeDrawer(self.data.iloc[num:(num+DATA_COUNT)])
+        rtd = RealTimeDrawer(self.data.iloc[num:(num+DATA_COUNT)], header=None)
         rtd.draw_now()
+
+class CuffDataCleaner:
+    def __init__(self):
+        dict = {}
+        length = len(KETSUATSU_FILES)
+        for i in np.arange(length):
+            ketsuatsu = pd.read_csv(KETSUATSU_ORIGINAL_DIR + '/' + KETSUATSU_FILES[i], header=None)
+            dict[i] = ketsuatsu[1]
+        self.data = pd.DataFrame(dict)
+
+    def clean(self):
+        self.data[((self.data - self.data[0:2].min()) > 50) & ((np.abs(self.data.diff()) > 50) | (np.abs(self.data.diff(2)) > 50))] = np.nan
+        self.data[((self.data - self.data[0:2].min()) < -10) & (np.abs(self.data.diff()) > 10)] = np.nan
+
+    def create_csv(self, filename='default.csv'):
+        length = len(KETSUATSU_FILES)
+        for i in np.arange(length):
+            ketsuatsu = pd.read_csv(KETSUATSU_DIR + '/' + KETSUATSU_FILES[i], header=None)
+            ketsuatsu[1] = self.data[i]
+            ketsuatsu.to_csv(KETSUATSU_DIR + '/' + KETSUATSU_FILES[i], header=None, index=False)
+
+class PulseWaveFeatureGetter:
+    def __init__(self, data):
+        self.data = data
+
+    def get_pulse_wave_accelation(self):
+        PULSE_WAVE_VELOCITY = 'pwv'
+        PULSE_WAVE_ACCELATION = 'pwa'
+        self.data[PULSE_WAVE_VELOCITY] = x.data[PLS_NORMALIZED].diff()
+        self.data[PULSE_WAVE_ACCELATION] = x.data[PULSE_WAVE_VELOCITY].diff()
+        ptt_calculator = PTTCalculator(self.data)
+        ptt_calculator.get_ecg_max_index()
+        ptt_calculator.get_pls_min_index()
+        ptt_calculator.get_ptt()
+        self.data[ECG_MAX] = ptt_calculator.data[ECG_MAX]
+        self.data[PLS_MIN] = ptt_calculator.data[PLS_MIN]
+        self.data[PTT] = ptt_calculator.data[PTT]
+        return
+
+
+    def max_min_point(self):
+        x
+
+    def get_pulse_wave_accelation_wave_height_raion(self):
+        x
+
+    def get_pulse_wave_accelation_wave_time_ratio(self):
+        x
+
+    def get_inflection_point_of_pulse_wave(self):
+        x
+
+    def get_augmentation_index(self):
+        x
+
+    def get_k_value(self):
+        x
+
+    def get_aging_index(self):
+        x
+
+    def get_area_volume_of_pulse_wave(self):
+        x
+
+    def create_csv(self, filename='default.csv'):
+        length = len(NORMALIZED_FILES)
+        # for i in np.arange(length):
+        #     self.data.to_csv(DATA_DIR_6 + '/' + filename)
+        self.data.to_csv(DATA_DIR_6 + '/' + filename)
+            
+
+
 
 if __name__ == '__main__':
     logging.debug( 'PID {0}'.format( os.getpid() ) )
@@ -533,8 +686,9 @@ if __name__ == '__main__':
             data_frame_controller_2.concat_pls_and_ecg()
             data_frame_controller_2.concat_p0_and_p1()
             data_frame_controller_2.create_datetime()
-            data_frame_controller_2.create_new_csv()
+            data_frame_controller_2.create_csv()
         return
+
 
     def simulate_one_file():
         calculate_one_file(pls_file=FILES[0], ecg_file=FILES[PERSON_COUNT])
@@ -547,21 +701,31 @@ if __name__ == '__main__':
     def concat_raw_files():
         concat_p0_and_p1_to_csv()
 
-    def create_noise_removed_files():
-        for file in CONCAT_FILES:
+    def create_cut_by_time_files():
+        for file in CONCAT_FILES: 
+            logging.debug('start to create cut by time {0}'.format(file))
             dr = DataReader(DATA_DIR_2, file)
-            nc = NoiseCanceler(dr.data)
-            nc.cancel_noise()
-            nc.create_csv(file)
+            cbtc = CutByTimeController(dr.data)
+            cbtc.cut_by_time(file)
+            cbtc.create_csv(file)
 
-    def create_noise_removed_files_2():
-        for file in WO_NOISE_FILES:
-            logging.debug('creating highpassed {0}'.format(file))
-            dr = DataReader(DATA_DIR_4_2, file)
+
+    def create_noise_removed_files():
+        for file in CUT_BY_TIME_FILES:
+            logging.debug('creating low- and high- passed {0}'.format(file))
+            dr = DataReader(DATA_DIR_3, file)
             nc = NoiseCanceler(dr.data)
-            nc.cancel_noise()
             nc.cancel_noise_2()
             nc.create_csv(file)
+
+    # def create_noise_removed_files_2():
+    #     for file in WO_NOISE_FILES:
+    #         logging.debug('creating highpassed {0}'.format(file))
+    #         dr = DataReader(DATA_DIR_4_2, file)
+    #         nc = NoiseCanceler(dr.data)
+    #         nc.cancel_noise()
+    #         nc.cancel_noise_2()
+    #         nc.create_csv(file)
 
     def normalize_files():
         for file in WO_NOISE_FILES:
@@ -587,24 +751,34 @@ if __name__ == '__main__':
             rtd = RealTimeDrawer(dr.data.iloc[num:(num+DATA_COUNT)], file)
             rtd.draw_now()
 
-    def simulate_one_ptt_calculater():
+    def simulate_one_ptt_calculator():
         dr = DataReader(DATA_DIR_6, FILES_6[1])
-        pc = PTTCalculater(dr.data)
+        pc = PTTCalculator(dr.data)
         pc.get_ecg_max_index()
         pc.get_pls_min_index()
         pc.get_ptt()
         pc.draw_now()
 
-    def simulate_ptt_calculater():
+    def simulate_ptt_calculator():
         for file in FILES_6:
             logging.debug('simulating {0}'.format(file))
             dr = DataReader(DATA_DIR_6, file)
-            pc = PTTCalculater(dr.data)
+            pc = PTTCalculator(dr.data)
             pc.get_pls_min_index()
             pc.get_ecg_max_index()
             pc.get_ptt()
             pc.create_csv(file)
-            # mmpg.draw_now()
+
+    def create_ptt_files():
+        for file in NORMALIZED_FILES:
+            logging.debug('simulating {0}'.format(file))
+            dr = DataReader(DATA_DIR_5, file)
+            pc = PTTCalculator(dr.data)
+            pc.get_pls_min_index()
+            pc.get_ecg_max_index()
+            pc.get_ptt()
+            pc.create_csv(file)
+            # pc.draw_now()
 
     def plot_ptt_with_time():
         file_count = len(FILES_7)
@@ -629,7 +803,8 @@ if __name__ == '__main__':
             ax.set_xlabel('')
             ax.set_xticks([])
             ax.set_xticklabels('')
-            name=FILES_7[i].replace('.csv', '')
+            # name = FILES_7[i].replace('.csv', '')
+            name = re.search('\d*', FILES_7[i]).group(0)
             logging.debug(name)
             ax.legend([name], loc='upper right')
         plt.subplots_adjust(wspace=0, hspace=0)
@@ -646,67 +821,237 @@ if __name__ == '__main__':
             date_string = pd.to_datetime(ptt.data.index[0]).strftime('%Y-%m-%d')
             na_dropped_ptt = ptt.data.dropna()
             na_dropped_ptt.index = pd.DatetimeIndex(na_dropped_ptt.index)
-            resampled_ptt = na_dropped_ptt.resample('s', how='mean')
+            # resampled_ptt = na_dropped_ptt.resample('s', how='mean')
             ketsuatsu = pd.read_csv(KETSUATSU_DIR + '/' + filename, header=None)
             ketsuatsu.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW]
             ketsuatsu[TIME] = date_string + ' ' + ketsuatsu[TIME]
             ketsuatsu.index = pd.DatetimeIndex(ketsuatsu[TIME])
-            ketsuatsu_ptt = pd.concat([ketsuatsu, resampled_ptt], axis=1, join='inner')
-            ketsuatsu_ptt.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW, PTT]
-            logging.debug(ketsuatsu_ptt)
-            ketsuatsu_ptt[[PTT, BLOOD_PRESSURE]].to_csv(KETSUATSU_PTT_DIR + '/' + filename)
+            ptt_list = []
+            for datetime_index in ketsuatsu.index:
+                sec = pd.tseries.offsets.Second(2)
+                # PTTは血圧測定時の+-2secのmedian
+                ptt = na_dropped_ptt[(datetime_index - sec):(datetime_index + sec)].median()[0]
+                logging.debug(ptt)
+                ptt_list.append(ptt)
+            # ketsuatsu_ptt = pd.concat([ketsuatsu, resampled_ptt], axis=1, join='inner')
+            # ketsuatsu_ptt.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW, PTT]
+            ketsuatsu[PTT] = ptt_list
+            logging.debug(ketsuatsu)
+            ketsuatsu[[PTT, BLOOD_PRESSURE]].to_csv(DATA_DIR_8 + '/' + filename)
             # ketsuatsu_ptt.plot(kind='scatter', x=BLOOD_PRESSURE, y=PTT)
 
     def plot_ketsuatsu_and_ptt():
-        file_count = len(KETSUATSU_PTT_FILES)
+        file_count = len(FILES_8)
         logging.debug('plot start')
         fig =  plt.figure(figsize=(15, 10))
         big_ax = fig.add_subplot(111)
-        big_ax.set_title('PTT vs Blood Pressure')
-        big_ax.set_ylabel('PTT[s]')
-        big_ax.set_xlabel('Blood Pressure[mmHg]')
+        big_ax.set_title('Blood Pressure vs PTT')
+        big_ax.set_xlabel('PTT[s]', fontsize=9)
+        big_ax.set_ylabel('Blood Pressure[mmHg]')
         big_ax.set_xticks([])
+        big_ax.set_yticks([])
         big_ax.set_xticklabels('')
+        big_ax.set_yticklabels('')
+
+        # 単回帰によるフィッティングをプロット&出力
+        rmse_list_of_linear_regression = []
+        id_list = []
+
         for i in np.arange(file_count):
-            logging.debug('start to plot {0}'.format(KETSUATSU_PTT_FILES[i]))
-            dr = DataReader(KETSUATSU_PTT_DIR, KETSUATSU_PTT_FILES[i])
+            logging.debug('start to plot {0}'.format(FILES_8[i]))
+            dr = DataReader(DATA_DIR_8, FILES_8[i])
+            # polyfit
+            clean_data = dr.data.dropna()
+            x = clean_data[PTT]
+            y = clean_data[BLOOD_PRESSURE]
+            fit = np.polyfit(x, y, 1)
+            fitx = np.poly1d(fit)
+            z = []
+            for j in np.arange(len(x.values)):
+                z.append(y.values[j] - fitx(x.values[j]))
+            # sample N is small number, so amount of freedom is minus 2
+            zzz = np.sqrt(( (np.array(z)**2).sum() / (len(z)-2) ))
+            rmse_list_of_linear_regression.append(zzz)
+            id_list.append(re.search('\d*', FILES_8[i]).group(0))
+
+            logging.debug(zzz)
+            logging.debug(x)
+            logging.debug(y)
+
             row = i / 4
             column = i % 4
             max_row = file_count / 4 + 1
             ax = fig.add_subplot(max_row, 4, i+1)
-
-
-            if dr.data[PTT].any():
-                # polyfit
-                clean_data = dr.data[dr.data[BLOOD_PRESSURE].notnull() & dr.data[PTT].notnull()]
-                x = clean_data[BLOOD_PRESSURE]
-                y = clean_data[PTT]
-                fit = np.polyfit(x, y, 2)
-                fitx = np.poly1d(fit)
-                logging.debug(x)
-                logging.debug(y)
-                dr.data.plot(kind='scatter', x=BLOOD_PRESSURE, y=PTT, ax=ax, legend=True, sharex=True, sharey=True)
-                ax.plot(x, fitx(x), 'b-')
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            # , xlim=(0.05, 0.18), ylim=(95, 270))
+            ax.plot(x, fitx(x), 'vr-')
             ax.set_xlabel('')
-            # ax.set_xticks([])
-            # ax.set_xticklabels('')
+            ax.set_xticks([])
+            ax.set_xticklabels('')
             ax.set_ylabel('')
-            # ax.set_yticks([])
-            # ax.set_yticklabels('')
-            name=FILES_7[i].replace('.csv', '')
+            ax.set_yticks([])
+            ax.set_yticklabels('')
+            # name = FILES_8[i].replace('.csv', '')
+            name = re.search('\d*', FILES_8[i]).group(0)
             logging.debug(name)
             ax.legend([name], loc='upper right')
+        linear_rmse_df = pd.DataFrame({'ID': id_list, 'RMSE': rmse_list_of_linear_regression})
+        linear_rmse_df = linear_rmse_df.set_index(['ID'])
+        linear_rmse_df.to_csv(DATA_DIR_9 + '/' + 'single_linear_regression.csv')
         plt.subplots_adjust(wspace=0, hspace=0)
         plt.show()
-        plt.savefig('ptt_with_blood_pressure.png')
+        plt.savefig('blood_pressure_with_ptt.png')
+        return rmse_list_of_linear_regression
+
+    def clean_cuff_data():
+        cdc = CuffDataCleaner()
+        cdc.clean()
+        cdc.create_csv()
+
+    def get_b1_and_b2():
+        file_count = len(FILES_8)
+
+        fig =  plt.figure(figsize=(15, 10))
+        big_ax = fig.add_subplot(111)
+        big_ax.set_title('Blood Pressure vs PTT')
+        big_ax.set_xlabel('PTT[s]', fontsize=9)
+        big_ax.set_ylabel('Blood Pressure[mmHg]')
+        big_ax.set_xticks([])
+        big_ax.set_yticks([])
+        big_ax.set_xticklabels('')
+        big_ax.set_yticklabels('')
+
+        def function_to_fit(x, b1, b2):
+            return (1.0 / (x ** 2)) * b1 + b2
+
+        def function_to_fit_2(params, x, y):
+            b1 = params[0]
+            b2 = params[1]
+            residual = y - (b1 / x**2 + b2)
+            return residual
+
+        params_init = np.array([0.0, 0.0])
+        b1_list = []
+        b2_list = []
+        rmse_list = []
+        id_list = []
+
+        # 提案式への回帰をプロット&出力
+        for i in np.arange(file_count):
+            dr = DataReader(DATA_DIR_8, FILES_8[i]) 
+            data = dr.data.dropna()
+            x = data[PTT]
+            y = data[BLOOD_PRESSURE]
+
+            # params_optimized, covariance = optimize.curve_fit(function_to_fit, x, y, p0=params_init)
+            params_optimized, covariance = optimize.leastsq(function_to_fit_2, params_init, args=(x, y))
+            logging.debug('params {0}'.format(params_optimized))
+            logging.debug('covariance {0}'.format(covariance))
+
+            z = []
+            for j in np.arange(len(x)):
+                z.append(function_to_fit_2(params_optimized, x[j], y[j]))
+            # sample N is small number, so amount of freedom is minus 2
+            rmse = np.sqrt((np.array(z) ** 2).sum() / (len(z)- 2))
+            logging.debug('RMSE {0}'.format(rmse))
+
+            b1_list.append(params_optimized[0])
+            b2_list.append(params_optimized[1])
+            rmse_list.append(rmse)
+            id_list.append(re.search('\d*', FILES_8[i]).group(0))
+
+            # y_fitted = function_to_fit(x, params_optimized[0], params_optimized[1])
+            y_fitted = params_optimized[0] / x.values**2 + params_optimized[1]
+            logging.debug('start to plot {0}'.format(FILES_8[i]))
+
+            row = i / 4
+            column = i % 4
+            max_row = file_count / 4 + 1
+            ax = fig.add_subplot(max_row, 4, i+1)
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            data = pd.DataFrame({'x': x, 'y_fitted': y_fitted})
+            data = data.set_index(['x']).sort_index()
+            logging.debug(data)
+            ax.plot(data.index, data['y_fitted'], 'vr-')
+            ax.set_xlabel('')
+            ax.set_xticks([])
+            ax.set_xticklabels('')
+            ax.set_ylabel('')
+            ax.set_yticks([])
+            ax.set_yticklabels('')
+            name = re.search('\d*', FILES_8[i]).group(0)
+            logging.debug(name)
+            ax.legend([name], loc='upper right')
+        logging.debug(rmse_list)
+        logging.debug(np.array(rmse_list).mean())
+        b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'RMSE': rmse_list})
+        b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
+        b1_b2_rmse_df.to_csv(DATA_DIR_9 + '/' + 'b1_b2_rmse.csv')
+
+        plt.subplots_adjust(wspace=0, hspace=0)
+        plt.show()
+        plt.savefig('ptt_with_blood_pressure_fitted_b1_b2.png')
+        return b1_b2_rmse_df
+
+    def get_ketsuatsu_and_ptt():
+        file_count = len(FILES_7)
+        for i in np.arange(file_count):
+            filename = FILES_7[i]
+            logging.debug('start {0}'.format(filename))
+            ptt = DataReader(DATA_DIR_7, filename)
+            date_string = pd.to_datetime(ptt.data.index[0]).strftime('%Y-%m-%d')
+            na_dropped_ptt = ptt.data.dropna()
+            na_dropped_ptt.index = pd.DatetimeIndex(na_dropped_ptt.index)
+            # resampled_ptt = na_dropped_ptt.resample('s', how='mean')
+            ketsuatsu = pd.read_csv(KETSUATSU_DIR + '/' + filename, header=None)
+            ketsuatsu.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW]
+            ketsuatsu[TIME] = date_string + ' ' + ketsuatsu[TIME]
+            ketsuatsu.index = pd.DatetimeIndex(ketsuatsu[TIME])
+            ptt_list = []
+            for datetime_index in ketsuatsu.index:
+                # sec = pd.tseries.offsets.Second(2)
+                sec = pd.tseries.offsets.Second(30)
+                # PTTは血圧測定時の+-2secのmedian
+                ptt = na_dropped_ptt[(datetime_index - sec):(datetime_index)].median()[0]
+                logging.debug(ptt)
+                ptt_list.append(ptt)
+            # ketsuatsu_ptt = pd.concat([ketsuatsu, resampled_ptt], axis=1, join='inner')
+            # ketsuatsu_ptt.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW, PTT]
+            ketsuatsu[PTT] = ptt_list
+            logging.debug(ketsuatsu)
+            ketsuatsu[[PTT, BLOOD_PRESSURE]].to_csv(DATA_DIR_8 + '/' + filename)
+            # ketsuatsu_ptt.plot(kind='scatter', x=BLOOD_PRESSURE, y=PTT)
+
+    def get_wave_form_features():
+        length = len(NORMALIZED_FILES)
+        for i in np.arange(length):
+            print( i )
+        dr = DataReader(DATA_DIR_5, NORMALIZED_FILES[0])
+        pwfg = PulseWaveFeatureGetter(dr.data)
+        return pwfg
 
 
-    # simulate_normalized_files_2()
-    # simulate_max_min_point_getter()
-    # simulate_ptt_calculater()
+    # # in sequence, it is supposed that p0 and p1 file exist which means 
+    # # data over 31 minutes and under 60 minutes
+    # # so this case one file under 30 minutes is eliminated
+    # simulate_raw_files()
+    # concat_p0_and_p1_to_csv()
+    # create_cut_by_time_files()
+    # create_noise_removed_files()
+    # normalize_files()
+    # create_ptt_files()
+    # plot_ptt_with_time()
+    # clean_cuff_data()
+    # get_ketsuatsu_and_ptt()
+    y = plot_ketsuatsu_and_ptt()
+    z = get_b1_and_b2()
+
+    # x = get_wave_form_features()
+
+
+    # simulate_normalized_files()
+    # simulate_ptt_calculator()
 
     # plot_ptt_with_time()
-    # simulate_one_ptt_calculater()
-    # get_ketsuatsu_and_ptt()
-    # plot_ketsuatsu_and_ptt()
-    zzz = DataReader(KETSUATSU_PTT_DIR, KETSUATSU_PTT_FILES[0])
+    # simulate_one_ptt_calculator()
+    # zzz = DataReader(KETSUATSU_PTT_DIR, KETSUATSU_PTT_FILES[0])
