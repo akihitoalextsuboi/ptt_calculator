@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import pandas as pd
+from mpl_toolkits.mplot3d import axes3d
 import matplotlib.pyplot as plt
 import scipy as sp
 import scipy.signal as signal
@@ -25,6 +26,10 @@ DATA_DIR_8 = './csvs_ketsuatsu_ptt'
 DATA_DIR_9 = './csvs_b1_b2_rmse'
 DATA_DIR_10 = './csvs_b1_b2_rmse_pwf'
 DATA_DIR_11 = './csvs_bp_pwf'
+
+DATA_DIR_12 = './csvs_ketsuatsu_ptt_by_student_residual'
+DATA_DIR_13 = './csvs_b1_b2_rmse_by_student_residual'
+DATA_DIR_14 = './csvs_ketsuatsu_ptt_with_theory'
 # KETSUATSU_PTT_DIR = './ketsuatsu_ptt'
 KETSUATSU_DIR = './ketsuatsu'
 KETSUATSU_ORIGINAL_DIR = './ketsuatsu_backup_original'
@@ -143,6 +148,8 @@ AUGMENTATION_INDEX = 'AI'
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 # logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+# matplotlib pandas setting
+# pd.options.display.mpl_style = 'default'
 
 
 class CSVReader:
@@ -653,6 +660,7 @@ class PulseWaveFeatureGetter:
         # ptt_calculator.get_ptt()
         self.data[ECG_MAX] = ptt_calculator.data[ECG_MAX]
         self.data[PLS_MIN] = ptt_calculator.data[PLS_MIN]
+        self.data[PLS_MAX] = ptt_calculator.data[PLS_MAX]
 
         # pls_min_points_index = self.data[PLS_MIN].dropna().index.get_level_values('position')
         # logging.debug(pls_min_points_index)
@@ -679,9 +687,13 @@ class PulseWaveFeatureGetter:
 
             logging.debug('start {0}'.format(datetime_index))
             sec = pd.tseries.offsets.Second(30)
-            ecg_maxes_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[ECG_MAX].notnull()]
+            # ecg_maxes_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[ECG_MAX].notnull()]
+            pls_mines_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[PLS_MIN].notnull()]
+            pls_maxes_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[PLS_MAX].notnull()]
             
-            logging.debug(ecg_maxes_of_ketsuatsu_window)
+            # logging.debug(ecg_maxes_of_ketsuatsu_window)
+            logging.debug(pls_mines_of_ketsuatsu_window)
+            logging.debug(pls_maxes_of_ketsuatsu_window)
             b_a_list = []
             b_a_point_list = []
             c_a_list = []
@@ -696,18 +708,20 @@ class PulseWaveFeatureGetter:
 
             logging.debug('start for bun---------------------------')
 
-            for ecg_max_position in ecg_maxes_of_ketsuatsu_window['ID']:
-                logging.debug('ecg_max_position {0}'.format(ecg_max_position))
+            for pls_min_position in pls_mines_of_ketsuatsu_window['ID']:
+                logging.debug('pls_min_position {0}'.format(pls_min_position))
 
                 # get pulse wave accelation height ratio, time ratio
                 logging.debug('x--------')
-                ecg_max_window = np.arange(int(ecg_max_position), int(ecg_max_position) + 1000)
-                argrel_max_points = np.intersect1d(ecg_max_window, argrelmax_points_index)
-                argrel_min_points = np.intersect1d(ecg_max_window, argrelmin_points_index)
+                pls_min_window = np.arange(int(pls_min_position), int(pls_min_position) + 1000)
+                argrel_max_points = np.intersect1d(pls_min_window, argrelmax_points_index)
+                argrel_min_points = np.intersect1d(pls_min_window, argrelmin_points_index)
+                pls_max_points = np.intersect1d(pls_min_window, pls_maxes_of_ketsuatsu_window)
                 logging.debug('y----------')
 
                 logging.debug(argrel_max_points)
                 logging.debug(argrel_min_points)
+                logging.debug(pls_max_points)
                 logging.debug('a = {0}'.format(self.data.ix[argrel_max_points[0]]))
                 logging.debug('c = {0}'.format(self.data.ix[argrel_max_points[1]]))
                 logging.debug('e = {0}'.format(self.data.ix[argrel_max_points[2]]))
@@ -715,17 +729,17 @@ class PulseWaveFeatureGetter:
                 logging.debug('b = {0}'.format(self.data.ix[argrel_min_points[0]]))
                 logging.debug('d = {0}'.format(self.data.ix[argrel_min_points[1]]))
 
-                a = self.data.ix[argrel_max_points[0]]
+                a_data = self.data.ix[argrel_max_points[0]]
                 a_point = argrel_max_points[0]
-                c = self.data.ix[argrel_max_points[1]]
+                c_data = self.data.ix[argrel_max_points[1]]
                 c_point = argrel_max_points[1]
-                e = self.data.ix[argrel_max_points[2]]
+                e_data = self.data.ix[argrel_max_points[2]]
                 e_point = argrel_max_points[2]
-                # 経験的に1と2
-                b = self.data.ix[argrel_min_points[1]]
-                b_point = argrel_min_points[1]
-                d = self.data.ix[argrel_min_points[2]]
-                d_point = argrel_min_points[2]
+
+                b_data = self.data.ix[argrel_min_points[0]]
+                b_point = argrel_min_points[0]
+                d_data = self.data.ix[argrel_min_points[1]]
+                d_point = argrel_min_points[1]
 
                 logging.debug(datetime_index)
                 logging.debug(a_point)
@@ -735,28 +749,39 @@ class PulseWaveFeatureGetter:
                 logging.debug(e_point)
 
 
-                b_a_list.append( b['pwa'] / a['pwa'] )
-                c_a_list.append( c['pwa'] / a['pwa'] )
-                d_a_list.append( d['pwa'] / a['pwa'] )
-                e_a_list.append( e['pwa'] / a['pwa'] )
+                b_a_list.append( b_data['pwa'] / a_data['pwa'] )
+                c_a_list.append( c_data['pwa'] / a_data['pwa'] )
+                d_a_list.append( d_data['pwa'] / a_data['pwa'] )
+                e_a_list.append( e_data['pwa'] / a_data['pwa'] )
 
                 b_a_point_list.append( ( b_point - a_point ) / 1000.0 ) 
                 c_a_point_list.append( ( c_point - a_point ) / 1000.0 )
                 d_a_point_list.append( ( d_point - a_point ) / 1000.0 )
                 e_a_point_list.append( ( e_point - a_point ) / 1000.0 )
+                logging.debug(b_a_list)
+                logging.debug(c_a_list)
+                logging.debug(d_a_list)
+                logging.debug(e_a_list)
 
 
-                logging.debug('for k-value min_point {0}'.format(self.data[PLS_NORMALIZED][a_point]))
-                logging.debug('same {0}'.format(self.data[PLS_MIN][a_point]))
-                logging.debug('for k-value and max point {0}'.format(self.data[PLS_NORMALIZED][d_point]))
-                logging.debug('for ai second point {0}'.format(self.data[PLS_NORMALIZED][e_point]))
 
-                # 理論上は変曲点aがpulse waveの最小値
-                # 変曲点dが最大値
-                # 変曲点eがAIの変曲点
-                k_value_list.append( self.data[PLS_NORMALIZED][a_point] / (-self.data[PLS_NORMALIZED][d_point] ))
-                augmentation_index_list.append( self.data[PLS_NORMALIZED][e_point] / self.data[PLS_NORMALIZED][d_point] )
-                logging.debug('z----------')
+                # 最小値は変曲点の前の二次微分が0の点がpulse waveの最小値
+                # 最大値はcとdの間の二次微分が0の点が最大値
+                # 変曲点dとeの間の二次微分が0の点が変曲点中点で近似
+                if (d_point + e_point) * 1000 % 2 == 0:
+                    half_point = (d_point + e_point) / 2
+                else:
+                    half_point = (d_point + e_point + 1) / 2
+
+                if pls_max_points.any():
+                    logging.debug('for k-value min_point {0}'.format(self.data[PLS_NORMALIZED][pls_min_position]))
+                    logging.debug('same {0}'.format(self.data[PLS_MIN][pls_min_position]))
+                    logging.debug('for k-value and max point {0}'.format(self.data[PLS_MAX][pls_max_points[0]]))
+                    logging.debug('for ai second point {0}'.format(self.data[PLS_NORMALIZED][half_point]))
+
+                    k_value_list.append( self.data[PLS_MAX][pls_max_points[0]] / (-self.data[PLS_MIN][pls_min_position] ))
+                    augmentation_index_list.append( (self.data[PLS_NORMALIZED][half_point] - self.data[PLS_NORMALIZED][pls_min_position] ) / (self.data[PLS_NORMALIZED][pls_max_points[0]] - self.data[PLS_NORMALIZED][pls_min_position]) )
+                    logging.debug('z----------')
 
             b_a = pd.Series(b_a_list).median()
             c_a = pd.Series(c_a_list).median()
@@ -779,33 +804,6 @@ class PulseWaveFeatureGetter:
 
         return self.data
 
-
-    def max_min_point(self):
-        x
-
-    def get_pulse_wave_accelation_wave_height_raio(self):
-        x
-
-    def get_pulse_wave_accelation_wave_time_ratio(self):
-        x
-
-    def get_inflection_point_of_pulse_wave(self):
-        x
-
-    def get_k_value(self):
-        x
-
-    def get_augmentation_index(self):
-        # inflection point の 一つ目 b / aに等しいので省略
-        x
-
-    def get_aging_index(self):
-        # 後から計算するので省略
-        x
-
-    def get_area_volume_of_pulse_wave(self):
-        # 比率に変換する方法を思いつかないので省略
-        x
 
     def create_csv(self, filename='default.csv'):
         length = len(NORMALIZED_FILES)
@@ -830,9 +828,10 @@ class FeatureRegression:
         self.data[K_VALUE] = np.nan
         self.data[AGING_INDEX] = np.nan
         self.data[AUGMENTATION_INDEX] = np.nan
+        self.data[PTT] = np.nan
         for i in np.arange(length):
             static_pwfs = pd.read_csv(DATA_DIR_6 + '/' + FILES_6[i])
-            static_pwf = static_pwfs.iloc[0:3].mean()
+            static_pwf = static_pwfs.iloc[0:2].mean()
             self.data[PWA_B].iloc[i] = static_pwf[2]
             self.data[PWA_C].iloc[i] = static_pwf[3]
             self.data[PWA_D].iloc[i] = static_pwf[4]
@@ -852,8 +851,9 @@ class FeatureRegression:
 class FeatureBloodPressureRegression:
     def __init__(self):
         x_data = pd.read_csv(DATA_DIR_6 + '/' + FILES_6[0])
-        self.df = pd.DataFrame(index=x_data.columns)
-        self.df = self.df.fillna(0)
+        self.df_bp = pd.DataFrame(index=x_data.columns)
+        self.df_ptt = pd.DataFrame(index=x_data.columns)
+        # self.df_bp = self.df.fillna(0)
         print 'here'
 
     def run(self):
@@ -862,13 +862,204 @@ class FeatureBloodPressureRegression:
         for i in np.arange(length):
             data = pd.read_csv(DATA_DIR_6 + '/' + FILES_6[i])
             data.corr().to_csv(DATA_DIR_11 + '/' + FILES_6[i])
-            self.df[FILES_6[i]] = data.corr().iloc[1]
-        self.df.to_csv(DATA_DIR_11 + '/' + 'correlation_of_sporting_pwf.csv')
+            self.df_bp[FILES_6[i]] = data.corr().iloc[1]
+            self.df_ptt[FILES_6[i]] = data.corr().iloc[0]
+        self.df_bp.to_csv(DATA_DIR_11 + '/' + 'correlation_of_bp_vs_sporting_pwf.csv')
+        self.df_ptt.to_csv(DATA_DIR_11 + '/' + 'correlation_of_ptt_vs_sporting_pwf.csv')
 
     def get_ols(self):
         print 'here'
 
+class TheoreticalB1B2Getter:
+    def __init__(self):
+        self.data = pd.read_csv('./csvs_b1_b2_rmse_pwf/b1_b2_pwf_rmse.csv')
+        self.b1_primary_param = None
+        self.b1_secodary_param = None
+        self.b2_primary_param = None
+        self.b2_secondary_param = None
+        self.data['B1(theory-single)'] = np.nan
+        self.data['B2(theory-single)'] = np.nan
+        self.data['B1(theory-multi)'] = np.nan
+        self.data['B2(theory-multi)'] = np.nan
 
+    def get_params(self):
+        print 'get_b1_b2'
+        self.data.drop([4, 12]).corr().drop(['B1', 'B2', 'RMSE'])[['B1', 'B2']].to_csv('csvs_aaa/b1_b2_relation.csv')
+        self.b1_primary_param = PWA_C
+        self.b1_secodary_param = AUGMENTATION_INDEX
+        self.b2_primary_param = PWA_C
+        self.b2_secondary_param = AUGMENTATION_INDEX
+
+    def get_theoretical_b1_b2(self):
+        print 'get_blood_pressure'
+        # 単回帰
+        b1_x = self.data[self.b1_primary_param]
+        b1_y = self.data['B1']
+        b1_X = sm.add_constant(b1_x)
+        b1_model = sm.OLS(b1_y, b1_X)
+        b1_results = b1_model.fit()
+        logging.debug('b1-single-summary: {0}'.format(b1_results.summary()))
+
+        b2_x = self.data[self.b2_primary_param]
+        b2_y = self.data['B2']
+        b2_X = sm.add_constant(b2_x)
+        b2_model = sm.OLS(b2_y, b2_X)
+        b2_results = b2_model.fit()
+        logging.debug('b2-single-summary: {0}'.format(b2_results.summary()))
+
+        b1_1, b1_2 = b1_results.params
+        b2_1, b2_2 = b2_results.params
+        self.data['B1(theory-single)'] = b1_results.params * b1_x # b1_1 + b1_2 * b1_x
+        self.data['B2(theory-single)'] = b2_results.params * b2_x # b2_1 + b2_2 * b2_x
+
+        # 重回帰
+        b1_x_multi = self.data[[self.b1_primary_param, self.b1_secodary_param]]
+        b1_X_multi = sm.add_constant(b1_x_multi)
+        b1_model_multi = sm.OLS(b1_y, b1_X_multi)
+        b1_results_multi = b1_model_multi.fit()
+        logging.debug('b1-multi-summary: {0}'.format(b1_results_multi.summary()))
+
+        b2_x_multi = self.data[[self.b2_primary_param, self.b2_secondary_param]]
+        # b2_x_multi[self.b2_secondary_param] = b2_x_multi[self.b2_secondary_param]
+        b2_X_multi = sm.add_constant(b2_x_multi)
+        b2_model_multi = sm.OLS(b2_y, b2_X_multi)
+        b2_results_multi = b2_model_multi.fit()
+        logging.debug('b2-multi-summary: {0}'.format(b2_results_multi.summary()))
+
+        self.data['B1(theory-multi)'] = b1_results_multi.params * b1_X_multi
+        self.data['B2(theory-multi)'] = b2_results_multi.params * b2_X_multi
+        self.data.to_csv('./csvs_aaa/b1_b2_theory.csv')
+
+class TheoreticalBloodPressureGetter:
+    def __init__(self, data):
+        self.data = data
+
+    def plot_and_save(self, filename):
+        self.data.to_csv(DATA_DIR_14 + '/' + filename)
+        self.data.plot()
+
+class TheoreticalBloodPressureGetter2:
+    def __init__(self, data):
+        self.data = data
+        self.primary_param = None
+        self.secondary_param = None
+        self.third_param = None
+
+    def get_params(self):
+        self.primary_param = PTT
+        self.secondary_param = PWA_C
+        self.third_param = PWA_D
+
+    def select_random_params(self):
+        print 'select random params from bp'
+        length = len(self.data)
+        teacher_count = int(len * 0.7)
+        test_count = length - teacher_count
+
+
+    def get_blood_pressure_by_multiple_linear_regression(self):
+        print 'calculate blood pressure and get rmse'
+        self.data = self.data.dropna()
+        x = self.data[[self.primary_param, self.secondary_param]]
+        blood_pressure_y = self.data[BLOOD_PRESSURE]
+        X = sm.add_constant(x)
+        model = sm.OLS(blood_pressure_y, X)
+        results = model.fit()
+        logging.debug(results.summary())
+
+        return x, blood_pressure_y,(results.params * X).sum(axis=1)
+
+
+class ModelPlotter:
+    def __init__(self):
+        print("print model")
+
+    def get_bp_ptt_graph(self): 
+        x = np.linspace(0.06, 0.16, num=20)
+        noise = np.random.randn(20)
+        b1 = 0.3
+        b2 = 110
+        y = b1 / x**2 + b2 + noise * 4 
+        y_fitted = b1 / x**2 + b2
+        logging.debug(x)
+        logging.debug(y)
+        plt.close()
+        fig = plt.figure()
+        plt.scatter(x, y, c='black', label='Measured')
+        plt.plot(x, y_fitted, c='b', label='Expected')
+        plt.xlabel('PTT [s]')
+        plt.ylabel('Systolic Blood Pressure [mmHg]')
+        plt.legend()
+
+        plt.show()
+
+
+
+    def get_f1_f2_f3_graph(self):
+        plt.close()
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        f1 = 30.0
+        f2 = 25.0
+        f3 = -50.0
+        x = y = np.arange(0, 1, 0.1)
+        X, Y = np.meshgrid(x, y)
+        z = np.array([(1 - x*f1 - y*f2) / f3 for x, y in zip(X, Y)])
+        Z = z.reshape(X.shape)
+        logging.debug(X)
+        logging.debug(Y)
+        logging.debug(Z)
+        logging.debug( [[x, y]for x, y in zip(X, Y)])
+        ax.plot_wireframe(X, Y, Z, rstride=3, cstride=3)
+        ax.scatter([0.2, 0.5, 0.5], [0.2, 0.4, 0.8], [0.22, 0.5, 0.7], marker='o', label='Subject A B C')
+        ax.set_xlabel('Feature_1')
+        ax.set_ylabel('Feature_2')
+        ax.set_zlabel('Feature_3')
+        ax.legend()
+        plt.show()
+
+
+    def get_bp_ptt_f_graph(self):
+        b1 = 0.3
+        b2 = 20
+        b3 = 100
+        def func(ptt, f1):
+            b1 = 0.3
+            b2 = 20
+            b3 = 80
+            sbp = b1 / ptt**2 + b2 * f1 + b3
+            return sbp
+
+        plt.close()
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        x = np.linspace(0.05, 0.19, 15) 
+        y = np.linspace(0.5, 0.6, 15)
+        X, Y = np.meshgrid(x, y)
+        z = np.array([func(x, y) for x, y in zip(X, Y)])
+        Z = z.reshape(X.shape)
+        x_line = np.arange(0.05, 0.15, 0.01) 
+        y_line = np.arange(0.5, 0.6, 0.01)
+        z_line = np.array([func(x, y) for x, y in zip(x_line, y_line)])
+        logging.debug(len(x_line))
+        logging.debug(len(y_line))
+
+        logging.debug(len(z_line))
+
+        # z_scatter = np.array([func(x, y) for y in np.ravel(Y)])
+        # z_scatter = np.array([b1 / x ** 2 + y for x, y in zip(f1_y, f1_y)])
+        # sbp = z_scatter.reshape(ptt.shape)
+        # ax.scatter(f1_y, f1_y, z_scatter)
+        ax.plot_wireframe(X, Y, Z, color='gray')
+        ax.plot(x_line, y_line, z_line ,color='b', linewidth=3, label='Subject')
+        ax.set_xlabel('PTT [s]')
+        ax.set_ylabel('f(F)')
+        ax.set_zlabel('Systolic Blood Pressure [mmHg]')
+        ax.set_ylim(0.45, 0.65)
+        ax.legend()
+        plt.show()
+        print ""
 
 if __name__ == '__main__':
     logging.debug( 'PID {0}'.format( os.getpid() ) )
@@ -1075,7 +1266,29 @@ if __name__ == '__main__':
             # ketsuatsu_ptt = pd.concat([ketsuatsu, resampled_ptt], axis=1, join='inner')
             # ketsuatsu_ptt.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW, PTT]
             ketsuatsu[PTT] = ptt_list
-            logging.debug(ketsuatsu)
+            # 単回帰によるcleaning 内部はstudent残差を用いているstudent残差が0.05以下は除外
+            ketsuatsu = ketsuatsu.dropna()
+            x = ketsuatsu[PTT]
+            X = sm.add_constant(x)
+            y = ketsuatsu[BLOOD_PRESSURE]
+            model = sm.OLS(y, X)
+            results = model.fit()
+            logging.debug(results.summary())
+            # student residual error rate alpha = 0.05(default)
+            # method default bonferroni
+            logging.debug(results.outlier_test())
+            # 帰無仮説が棄却されなくなるまで繰り返し
+            while (results.outlier_test()['bonf(p)'] < 0.5).any():
+                ketsuatsu = ketsuatsu[results.outlier_test()['bonf(p)'] > 0.5]
+                x = ketsuatsu[PTT]
+                X = sm.add_constant(x)
+                y = ketsuatsu[BLOOD_PRESSURE]
+                model = sm.OLS(y, X)
+                results = model.fit()
+                logging.debug(results.summary())
+                logging.debug(results.outlier_test())
+            
+
             ketsuatsu[[PTT, BLOOD_PRESSURE]].to_csv(DATA_DIR_8 + '/' + filename)
             # ketsuatsu_ptt.plot(kind='scatter', x=BLOOD_PRESSURE, y=PTT)
 
@@ -1317,12 +1530,17 @@ if __name__ == '__main__':
         plt.savefig('ptt_with_blood_pressure_fitted_b1_b2_with_log_linear.png')
         return b1_b2_rmse_df
 
+    def get_b1_b2_with_student_residual():
+        print 'here'
+
 
 
     def get_wave_form_features():
         length = len(NORMALIZED_FILES)
         for i in np.arange(length):
+            # 正規化したPLS(norm)とECG(norm)があるファイルを使う
             dr = DataReader(DATA_DIR_5, NORMALIZED_FILES[i])
+            # pttとketsutsuの時間変化のファイルを使う
             ketsuatsu = pd.read_csv(DATA_DIR_8 + '/' + NORMALIZED_FILES[i], index_col=0)
             pwfg = PulseWaveFeatureGetter(dr.data, ketsuatsu)
             pwfg.get_pulse_wave_accelation()
@@ -1332,11 +1550,208 @@ if __name__ == '__main__':
     def get_wave_form_features_1():
         length = len(NORMALIZED_FILES)
         dr = DataReader(DATA_DIR_5, NORMALIZED_FILES[0])
-        ketsuatsu = pd.read_csv(DATA_DIR_8 + '/' + NORMALIZED_FILES[0], header=None)
+        ketsuatsu = pd.read_csv(DATA_DIR_8 + '/' + NORMALIZED_FILES[0], index_col=0)
         pwfg = PulseWaveFeatureGetter(dr.data, ketsuatsu)
         x = pwfg.get_pulse_wave_accelation()
-        # pwfg.create_csv(NORMALIZED_FILES[0])
+        pwfg.create_csv(NORMALIZED_FILES[0])
         return x
+
+    def get_theoretical_blood_pressure():
+        b1_b2_theory = pd.read_csv('csvs_aaa/b1_b2_theory.csv')
+
+        file_count = len(FILES_8)
+
+        fig =  plt.figure(figsize=(15, 10))
+        big_ax = fig.add_subplot(111)
+        big_ax.set_title('Blood Pressure vs PTT')
+        big_ax.set_xlabel('PTT[s]', fontsize=9)
+        big_ax.set_ylabel('Blood Pressure[mmHg]')
+        big_ax.set_xticks([])
+        big_ax.set_yticks([])
+        big_ax.set_xticklabels('')
+        big_ax.set_yticklabels('')
+
+        rmse_list = []
+        id_list =[]
+
+        for i in np.arange(file_count):
+            dr = DataReader(DATA_DIR_8, FILES_8[i]) 
+            data = dr.data.dropna()
+            x = data[PTT].values
+            y = data[BLOOD_PRESSURE].values
+            id_num = int(re.search('\d*', FILES_8[i]).group(0))
+            b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
+
+            b1 = b1_b2_theory_id['B1'].values[0]
+            b2 = b1_b2_theory_id['B2'].values[0]
+            b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
+            b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
+            b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
+            b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
+
+            y_fitted = b1 / x**2 + b2
+            y_fitted_single = b1_single / x**2 + b2_single
+            y_fitted_multi = b1_multi / x** 2 + b2_multi
+
+            z = y - y_fitted
+            z_single = y - y_fitted_single
+            z_multi = y - y_fitted_multi
+
+            rmse = np.sqrt((np.array(z) ** 2).sum() / (len(z)- 2))
+            rmse_single = np.sqrt((np.array(z_single) ** 2).sum() / (len(z_single)- 2))
+            rmse_multi = np.sqrt((np.array(z_multi) ** 2).sum() / (len(z_multi)- 2))
+
+            logging.debug('RMSE {0}'.format(rmse))
+            logging.debug('RMSE_SINGLE {0}'.format(rmse_single))
+            logging.debug('RMSE_MULTI {0}'.format(rmse_multi))
+
+            rmse_list.append(rmse)
+            id_list.append(re.search('\d*', FILES_8[i]).group(0))
+
+            logging.debug('start to plot {0}'.format(FILES_8[i]))
+
+            row = i / 4
+            column = i % 4
+            max_row = file_count / 4 + 1
+            ax = fig.add_subplot(max_row, 4, i+1)
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            data = pd.DataFrame({'x': x, 'y_fitted': y_fitted, 'y_fitted_single': y_fitted_single, 'y_fitted_multi': y_fitted_multi})
+            data = data.set_index(['x']).sort_index()
+            logging.debug(data)
+
+            ax.plot(data.index, data['y_fitted'], 'vr-')
+            ax.plot(data.index, data['y_fitted_single'], '^g--')
+            ax.plot(data.index, data['y_fitted_multi'], 'xy--')
+
+            ax.set_xlabel('')
+            ax.set_xticks([])
+            ax.set_xticklabels('')
+            ax.set_ylabel('')
+            ax.set_yticks([])
+            ax.set_yticklabels('')
+            name = re.search('\d*', FILES_8[i]).group(0)
+            logging.debug(name)
+            ax.legend([name], loc='upper right')
+
+        logging.debug(rmse_list)
+        logging.debug(np.array(rmse_list).mean())
+        # b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'alpha': alpha_list, 'RMSE': rmse_list})
+        # b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
+        # b1_b2_rmse_df.to_csv(DATA_DIR_9 + '/' + 'b1_b2_rmse_log_linear.csv')
+
+        plt.subplots_adjust(wspace=0, hspace=0)
+        plt.show()
+        plt.savefig('ptt_with_blood_pressure_theoretical_three_types.png')
+        return
+
+    def get_theoretical_blood_pressure2():
+        b1_b2_theory = pd.read_csv('csvs_aaa/b1_b2_theory.csv')
+
+        file_count = len(FILES_8)
+
+        fig =  plt.figure(figsize=(15, 10))
+        fig_3d = plt.figure()
+        ax_3d = fig_3d.add_subplot(111, projection='3d')
+        ax_3d.set_xlabel('PTT[s]')
+        ax_3d.set_ylabel('c/a')
+        ax_3d.set_zlabel('Systolic Blood Pressure[mmHg]')
+
+        big_ax = fig.add_subplot(111)
+        big_ax.set_title('Blood Pressure vs PTT')
+        big_ax.set_xlabel('PTT [s]', fontsize=9)
+        big_ax.set_ylabel('Blood Pressure [mmHg]')
+        big_ax.set_xticks([])
+        big_ax.set_yticks([])
+        big_ax.set_xticklabels('')
+        big_ax.set_yticklabels('')
+
+        rmse_list = []
+        id_list =[]
+
+        for i in np.arange(file_count):
+            dr = DataReader(DATA_DIR_8, FILES_8[i]) 
+            data = dr.data.dropna()
+            # data_bp_pwf = pd.read_csv('./csvs_bp_pwf/{0}'.format(FILES_8[i]))
+            data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
+            tbpg2 = TheoreticalBloodPressureGetter2(data_blood_pressure_with_feature_and_ptt)
+            tbpg2.get_params()
+            params, measured_blood_pressure,theoretical_blood_pressure = tbpg2.get_blood_pressure_by_multiple_linear_regression()
+            x = data[PTT].values
+            y = data[BLOOD_PRESSURE].values
+
+            # id_num = int(re.search('\d*', FILES_8[i]).group(0))
+            # b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
+
+            # b1 = b1_b2_theory_id['B1'].values[0]
+            # b2 = b1_b2_theory_id['B2'].values[0]
+            # b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
+            # b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
+            # b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
+            # b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
+
+            # y_fitted = b1 / x**2 + b2
+            # y_fitted_single = b1_single / x**2 + b2_single
+            # y_fitted_multi = b1_multi / x** 2 + b2_multi
+
+            # z = y - y_fitted
+            # z_single = y - y_fitted_single
+            # z_multi = y - y_fitted_multi
+
+            # rmse = np.sqrt((np.array(z) ** 2).sum() / (len(z)- 2))
+            # rmse_single = np.sqrt((np.array(z_single) ** 2).sum() / (len(z_single)- 2))
+            # rmse_multi = np.sqrt((np.array(z_multi) ** 2).sum() / (len(z_multi)- 2))
+
+            #logging.debug('RMSE {0}'.format(rmse))
+            #logging.debug('RMSE_SINGLE {0}'.format(rmse_single))
+            #logging.debug('RMSE_MULTI {0}'.format(rmse_multi))
+
+            # rmse_list.append(rmse)
+            id_list.append(re.search('\d*', FILES_8[i]).group(0))
+
+            logging.debug('start to plot {0}'.format(FILES_8[i]))
+
+            row = i / 4
+            column = i % 4
+            max_row = file_count / 4 + 1
+            ax = fig.add_subplot(max_row, 4, i+1)
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            data = pd.DataFrame({'x': params[PTT], 'y_fitted': measured_blood_pressure, 'z': params[PWA_C]})
+            data_measured = pd.DataFrame({'x': params[PTT], 'y_fitted': theoretical_blood_pressure, 'z': params[PWA_C]})
+            data = data.set_index(['x']).sort_index()
+            data_measured = data_measured.set_index(['x']).sort_index()
+            logging.debug(data)
+
+            ax.plot(data.index, data['y_fitted'], 'vr-')
+            # ax.plot(data.index, data['y_fitted_single'], '^g--')
+            # ax.plot(data.index, data['y_fitted_multi'], 'xy--')
+
+            ax.set_xlabel('')
+            ax.set_xticks([])
+            ax.set_xticklabels('')
+            ax.set_ylabel('')
+            ax.set_yticks([])
+            ax.set_yticklabels('')
+            name = re.search('\d*', FILES_8[i]).group(0)
+            logging.debug(name)
+            ax.legend([name], loc='upper right')
+
+            ax_3d.scatter(data.index, data['z'], data['y_fitted'], c='g')
+            ax_3d.scatter(data_measured.index, data_measured['z'], data_measured['y_fitted'], c='r')
+
+            if i in [7, 18, 20]:
+                ax_3d.plot_wireframe(data.index, data['z'], data['y_fitted'], colors='g')
+                ax_3d.plot_wireframe(data_measured.index, data_measured['z'], data_measured['y_fitted'], colors='r')
+        logging.debug(rmse_list)
+        logging.debug(np.array(rmse_list).mean())
+        # b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'alpha': alpha_list, 'RMSE': rmse_list})
+        # b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
+        # b1_b2_rmse_df.to_csv(DATA_DIR_9 + '/' + 'b1_b2_rmse_log_linear.csv')
+
+        plt.subplots_adjust(wspace=0, hspace=0)
+        plt.show()
+        plt.savefig('ptt_with_blood_pressure_theoretical_by_multi_regression.png')
+        return data
+
 
 
     # # in sequence, it is supposed that p0 and p1 file exist which means 
@@ -1350,7 +1765,8 @@ if __name__ == '__main__':
     # create_ptt_files()
     # plot_ptt_with_time()
     # clean_cuff_data()
-    # get_ketsuatsu_and_ptt()
+    # ketsuatsu = get_ketsuatsu_and_ptt()
+
     # y = plot_ketsuatsu_and_ptt()
     # z = get_b1_and_b2()
     # y = get_b1_and_b2_by_log_linear()
@@ -1358,7 +1774,19 @@ if __name__ == '__main__':
     # x = get_wave_form_features()
     # fr = FeatureRegression()
     # x = fr.get_static_pulse_wave_feature()
+    # fr.create_csv()
     # FeatureBloodPressureRegression().run()
+    # tbbg = TheoreticalB1B2Getter()
+    # tbbg.get_params()
+    # tbbg.get_theoretical_b1_b2()
+    # get_theoretical_blood_pressure()
+    x = get_theoretical_blood_pressure2()
+
+
+    # mp = ModelPlotter()
+    # mp.get_f1_f2_f3_graph()
+    # mp.get_bp_ptt_f_graph()
+    
 
 
     # simulate_normalized_files()
