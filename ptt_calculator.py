@@ -8,6 +8,7 @@ import scipy.signal as signal
 import scipy.optimize as optimize
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
+from statsmodels.tools.eval_measures import rmse as srmse
 import logging
 import sys
 import os
@@ -149,7 +150,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 # logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 # matplotlib pandas setting
-# pd.options.display.mpl_style = 'default'
+pd.options.display.mpl_style = 'default'
 
 
 class CSVReader:
@@ -881,6 +882,7 @@ class TheoreticalB1B2Getter:
         self.data['B2(theory-single)'] = np.nan
         self.data['B1(theory-multi)'] = np.nan
         self.data['B2(theory-multi)'] = np.nan
+        self.drop_list = [4, 9, 12]
 
     def get_params(self):
         print 'get_b1_b2'
@@ -893,15 +895,15 @@ class TheoreticalB1B2Getter:
     def get_theoretical_b1_b2(self):
         print 'get_blood_pressure'
         # 単回帰
-        b1_x = self.data[self.b1_primary_param]
-        b1_y = self.data['B1']
+        b1_x = self.data[self.b1_primary_param].drop(self.drop_list)
+        b1_y = self.data['B1'].drop(self.drop_list)
         b1_X = sm.add_constant(b1_x)
         b1_model = sm.OLS(b1_y, b1_X)
         b1_results = b1_model.fit()
         logging.debug('b1-single-summary: {0}'.format(b1_results.summary()))
 
-        b2_x = self.data[self.b2_primary_param]
-        b2_y = self.data['B2']
+        b2_x = self.data[self.b2_primary_param].drop(self.drop_list)
+        b2_y = self.data['B2'].drop(self.drop_list)
         b2_X = sm.add_constant(b2_x)
         b2_model = sm.OLS(b2_y, b2_X)
         b2_results = b2_model.fit()
@@ -909,30 +911,47 @@ class TheoreticalB1B2Getter:
 
         b1_1, b1_2 = b1_results.params
         b2_1, b2_2 = b2_results.params
-        self.data['B1(theory-single)'] = b1_results.params * b1_x # b1_1 + b1_2 * b1_x
-        self.data['B2(theory-single)'] = b2_results.params * b2_x # b2_1 + b2_2 * b2_x
+        b1_single = b1_results.predict()
+        b2_single = b2_results.predict()
+        for i in self.drop_list:
+            b1_single = np.insert(b1_single, i, 0)
+            b2_single = np.insert(b2_single, i, 0)
+
+        self.data['B1(theory-single)'] = b1_single
+        self.data['B2(theory-single)'] = b2_single
 
         # 重回帰
-        b1_x_multi = self.data[[self.b1_primary_param, self.b1_secodary_param]]
+        b1_x_multi = self.data[[self.b1_primary_param, self.b1_secodary_param]].drop(self.drop_list)
         b1_X_multi = sm.add_constant(b1_x_multi)
         b1_model_multi = sm.OLS(b1_y, b1_X_multi)
         b1_results_multi = b1_model_multi.fit()
         logging.debug('b1-multi-summary: {0}'.format(b1_results_multi.summary()))
 
-        b2_x_multi = self.data[[self.b2_primary_param, self.b2_secondary_param]]
+        b2_x_multi = self.data[[self.b2_primary_param, self.b2_secondary_param]].drop(self.drop_list)
         # b2_x_multi[self.b2_secondary_param] = b2_x_multi[self.b2_secondary_param]
         b2_X_multi = sm.add_constant(b2_x_multi)
         b2_model_multi = sm.OLS(b2_y, b2_X_multi)
         b2_results_multi = b2_model_multi.fit()
         logging.debug('b2-multi-summary: {0}'.format(b2_results_multi.summary()))
+        b1_multi = b1_results_multi.predict()
+        b2_multi = b2_results_multi.predict()
+        for i in self.drop_list:
+            b1_multi = np.insert(b1_multi, i, 0)
+            b2_multi = np.insert(b2_multi, i, 0)
 
-        self.data['B1(theory-multi)'] = b1_results_multi.params * b1_X_multi
-        self.data['B2(theory-multi)'] = b2_results_multi.params * b2_X_multi
+        self.data['B1(theory-multi)'] = b1_multi
+        self.data['B2(theory-multi)'] = b2_multi
         self.data.to_csv('./csvs_aaa/b1_b2_theory.csv')
 
 class TheoreticalBloodPressureGetter:
     def __init__(self, data):
         self.data = data
+        self.primary_param = None
+        self.secondary_param = None
+
+    def get_params(self):
+        self.primary_param = PWA_C
+        self.secondary_param = AUGMENTATION_INDEX
 
     def plot_and_save(self, filename):
         self.data.to_csv(DATA_DIR_14 + '/' + filename)
@@ -961,13 +980,24 @@ class TheoreticalBloodPressureGetter2:
         print 'calculate blood pressure and get rmse'
         self.data = self.data.dropna()
         x = self.data[[self.primary_param, self.secondary_param]]
+        x[self.primary_param] = 1 / x[self.primary_param] ** 2
         blood_pressure_y = self.data[BLOOD_PRESSURE]
         X = sm.add_constant(x)
         model = sm.OLS(blood_pressure_y, X)
         results = model.fit()
         logging.debug(results.summary())
+        logging.debug('RMSE: --------------------') 
+        logging.debug('MSE:')
+        logging.debug(blood_pressure_y - (results.params * X).sum(axis=1))
+        logging.debug('RMSE: --------------------') 
+        RMSE = np.sqrt(((blood_pressure_y - (results.params * X).sum(axis=1)) ** 2).sum() / (len(blood_pressure_y) - 3))
+        logging.debug(RMSE)
+        logging.debug('-----------------------')
 
-        return x, blood_pressure_y,(results.params * X).sum(axis=1)
+        return self.data, blood_pressure_y,(results.params * X).sum(axis=1), results
+
+    def get_blood_pressure_by_multiple_linear_regression2(self):
+        print 'calculate blood pressure and get rmse'
 
 
 class ModelPlotter:
@@ -1572,22 +1602,49 @@ if __name__ == '__main__':
         big_ax.set_yticklabels('')
 
         rmse_list = []
+        rmse_single_list = []
+        rmse_multi_list = []
         id_list =[]
+        b1_list = []
+        b2_list = []
+        b1_single_list = []
+        b2_single_list = []
+        b1_multi_list = []
+        b2_multi_list = []
 
         for i in np.arange(file_count):
-            dr = DataReader(DATA_DIR_8, FILES_8[i]) 
+            if i in [4, 9, 12]:
+                continue
+            if i == 5:
+                dr = DataReader(DATA_DIR_8, FILES_8[i]) 
+            else:
+                dr = DataReader(DATA_DIR_8, FILES_8[i]) 
             data = dr.data.dropna()
             x = data[PTT].values
             y = data[BLOOD_PRESSURE].values
             id_num = int(re.search('\d*', FILES_8[i]).group(0))
             b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
 
-            b1 = b1_b2_theory_id['B1'].values[0]
-            b2 = b1_b2_theory_id['B2'].values[0]
-            b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
-            b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
-            b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
-            b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
+            if id_num == 19:
+                b1 = b1_b2_theory[b1_b2_theory['ID'] == 19]['B1'].iloc[1]
+                b2 = b1_b2_theory[b1_b2_theory['ID'] == 19]['B2'].iloc[1]
+                b1_single = b1_b2_theory[b1_b2_theory['ID'] == 19]['B1(theory-single)'].iloc[1]
+                b2_single = b1_b2_theory[b1_b2_theory['ID'] == 19]['B2(theory-single)'].iloc[1]
+                b1_multi = b1_b2_theory[b1_b2_theory['ID'] == 19]['B1(theory-multi)'].iloc[1]
+                b2_multi = b1_b2_theory[b1_b2_theory['ID'] == 19]['B2(theory-multi)'].iloc[1]
+            else:
+                b1 = b1_b2_theory_id['B1'].values[0]
+                b2 = b1_b2_theory_id['B2'].values[0]
+                b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
+                b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
+                b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
+                b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
+            b1_list.append(b1)
+            b2_list.append(b2)
+            b1_single_list.append(b1_single)
+            b2_single_list.append(b2_single)
+            b1_multi_list.append(b1_multi)
+            b2_multi_list.append(b2_multi)
 
             y_fitted = b1 / x**2 + b2
             y_fitted_single = b1_single / x**2 + b2_single
@@ -1606,6 +1663,8 @@ if __name__ == '__main__':
             logging.debug('RMSE_MULTI {0}'.format(rmse_multi))
 
             rmse_list.append(rmse)
+            rmse_single_list.append(rmse_single)
+            rmse_multi_list.append(rmse_multi)
             id_list.append(re.search('\d*', FILES_8[i]).group(0))
 
             logging.debug('start to plot {0}'.format(FILES_8[i]))
@@ -1614,7 +1673,8 @@ if __name__ == '__main__':
             column = i % 4
             max_row = file_count / 4 + 1
             ax = fig.add_subplot(max_row, 4, i+1)
-            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            logging.debug(dr.data.dropna())
+            # dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
             data = pd.DataFrame({'x': x, 'y_fitted': y_fitted, 'y_fitted_single': y_fitted_single, 'y_fitted_multi': y_fitted_multi})
             data = data.set_index(['x']).sort_index()
             logging.debug(data)
@@ -1633,11 +1693,33 @@ if __name__ == '__main__':
             logging.debug(name)
             ax.legend([name], loc='upper right')
 
+            fig_big = plt.figure()
+            logging.debug(dr.data.dropna())
+            ax_big = fig_big.add_subplot(111)
+            logging.debug('---------------------')
+            logging.debug(data)
+            logging.debug('---------------------')
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax_big, c='b', legend=True, label='Measured') # , sharex=True, sharey=True)
+            ax_big.plot(data.index, data['y_fitted'],  'kv--', label='Expected')
+            ax_big.plot(data.index, data['y_fitted_single'],'r^-', label='Single Regression')
+            ax_big.plot(data.index, data['y_fitted_multi'], 'gx-', label='Multi Regression')
+            ax_big.set_xlabel('PTT [s]')
+            ax_big.set_ylabel('Systolic Blood Pressure [mmHg]')
+            ax_big.set_title('Subject ' + name)
+            ax_big.legend()
+            plt.draw()
+            # plt.savefig('./graphs_original_b1b2/subject' + name + '.png')
+            plt.savefig('./graphs_/subject' + name + '.png')
+
         logging.debug(rmse_list)
+        logging.debug(rmse_single_list)
+        logging.debug(rmse_multi_list)
         logging.debug(np.array(rmse_list).mean())
-        # b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'alpha': alpha_list, 'RMSE': rmse_list})
-        # b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
-        # b1_b2_rmse_df.to_csv(DATA_DIR_9 + '/' + 'b1_b2_rmse_log_linear.csv')
+        logging.debug(np.array(rmse_single_list).mean())
+        logging.debug(np.array(rmse_single_list).mean())
+        b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'B1(single)': b1_single_list, 'B2(single)': b2_single_list, 'B1(multi)': b1_multi_list, 'B2(multi)': b2_multi_list, 'RMSE': rmse_list, 'RMSE(single)': rmse_single_list, 'RMSE(multi)': rmse_multi_list})
+        b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
+        b1_b2_rmse_df.to_csv('./csvs_you_need' + '/' + 'b1_b2_rmse_single_multi.csv')
 
         plt.subplots_adjust(wspace=0, hspace=0)
         plt.show()
@@ -1655,6 +1737,13 @@ if __name__ == '__main__':
         ax_3d.set_xlabel('PTT[s]')
         ax_3d.set_ylabel('c/a')
         ax_3d.set_zlabel('Systolic Blood Pressure[mmHg]')
+        ax_3d.set_title('Measured(Blue) & Calculated(Red)' + '\n' + 'Blood Pressure')
+        fig_3d_2 = plt.figure()
+        ax_3d_2 = fig_3d_2.add_subplot(111, projection='3d')
+        ax_3d_2.set_xlabel('PTT[s]')
+        ax_3d_2.set_ylabel('c/a')
+        ax_3d_2.set_zlabel('Systolic Blood Pressure[mmHg]')
+        ax_3d_2.set_title('Measured(Blue) & Calculated(Red)' + '\n' + 'Blood Pressure')
 
         big_ax = fig.add_subplot(111)
         big_ax.set_title('Blood Pressure vs PTT')
@@ -1667,17 +1756,49 @@ if __name__ == '__main__':
 
         rmse_list = []
         id_list =[]
+        # statistical_data = pd.DataFrame(columns=['ID', 'RMSE', 'MSE', 'rsquared_adj', 'f_pvalue', 'params[const]', 'params[PTT]', 'params[PWA_C]', 'pvalues[const]', 'pvalues[PTT]', 'pvalues[PWA_C]'])
+
+        all_data = np.array([])
+        all_feature_data = pd.DataFrame(columns = ['PTT', PWA_C])
+        for i in np.arange(file_count):
+            if i in [4, 9, 12]:
+                continue
+            dr = DataReader(DATA_DIR_8, FILES_8[i])
+            data = dr.data.dropna()
+            np.append(all_data, data)
+            data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
+            all_feature_data = pd.concat([all_feature_data, data_blood_pressure_with_feature_and_ptt])
+        all_feature_data = pd.DataFrame(all_feature_data)
+        tbpg2 = TheoreticalBloodPressureGetter2(all_feature_data)
+        tbpg2.get_params()
+        params2, measured_blood_pressure2,theoretical_blood_pressure2, results= tbpg2.get_blood_pressure_by_multiple_linear_regression()
+        data_2 = pd.DataFrame({'x': params2[PTT], 'y_fitted': measured_blood_pressure2, 'z': params2[PWA_C]})
+        data_measured_2 = pd.DataFrame({'x': params2[PTT], 'y_fitted': theoretical_blood_pressure2, 'z': params2[PWA_C]})
+        data_2 = data_2.set_index(['x']).sort_index()
+        data_measured_2 = data_measured_2.set_index(['x']).sort_index()
+        ax_3d_2.scatter(data_2.index, data_2['z'], data_2['y_fitted'], c='r')
+        ax_3d_2.scatter(data_measured_2.index, data_measured_2['z'], data_measured_2['y_fitted'], c='b')
+
+        statistical_data = pd.DataFrame([{'ID': 100, 'RMSE': np.sqrt(results.mse_resid), 'rsquared_adj': results.rsquared_adj, 'f_pvalue': results.f_pvalue, 'params[const]': results.params[0], 'params[PTT]': results.params[1], 'params[PWA_C]': results.params[2], 'pvalues[const]': results.pvalues[0], 'pvalues[PTT]': results.pvalues[1], 'pvalues[PWA_C]': results.pvalues[2] }])
+        
+
 
         for i in np.arange(file_count):
+            if i in [4, 9, 12]:
+                continue
             dr = DataReader(DATA_DIR_8, FILES_8[i]) 
             data = dr.data.dropna()
             # data_bp_pwf = pd.read_csv('./csvs_bp_pwf/{0}'.format(FILES_8[i]))
             data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
             tbpg2 = TheoreticalBloodPressureGetter2(data_blood_pressure_with_feature_and_ptt)
             tbpg2.get_params()
-            params, measured_blood_pressure,theoretical_blood_pressure = tbpg2.get_blood_pressure_by_multiple_linear_regression()
+            params, measured_blood_pressure,theoretical_blood_pressure, results = tbpg2.get_blood_pressure_by_multiple_linear_regression()
             x = data[PTT].values
             y = data[BLOOD_PRESSURE].values
+
+            id = int(re.search('\d*', FILES_8[i]).group(0))
+            rmse_from_resid = np.sqrt(results.mse_resid)
+            statistical_data = pd.concat([statistical_data, pd.DataFrame([{'ID': id, 'RMSE': rmse_from_resid, 'rsquared_adj': results.rsquared_adj, 'f_pvalue': results.f_pvalue, 'params[const]': results.params[0], 'params[PTT]': results.params[1], 'params[PWA_C]': results.params[2], 'pvalues[const]': results.pvalues[0], 'pvalues[PTT]':results.pvalues[1], 'pvalues[PWA_C]':results.pvalues[2] }])])
 
             # id_num = int(re.search('\d*', FILES_8[i]).group(0))
             # b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
@@ -1713,44 +1834,275 @@ if __name__ == '__main__':
             row = i / 4
             column = i % 4
             max_row = file_count / 4 + 1
-            ax = fig.add_subplot(max_row, 4, i+1)
-            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
-            data = pd.DataFrame({'x': params[PTT], 'y_fitted': measured_blood_pressure, 'z': params[PWA_C]})
-            data_measured = pd.DataFrame({'x': params[PTT], 'y_fitted': theoretical_blood_pressure, 'z': params[PWA_C]})
+            # ax = fig.add_subplot(max_row, 4, i+1)
+            # dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            data_measured = pd.DataFrame({'x': params[PTT], 'y_fitted': measured_blood_pressure, 'z': params[PWA_C]})
+            data = pd.DataFrame({'x': params[PTT], 'y_fitted': theoretical_blood_pressure, 'z': params[PWA_C]})
             data = data.set_index(['x']).sort_index()
             data_measured = data_measured.set_index(['x']).sort_index()
             logging.debug(data)
 
-            ax.plot(data.index, data['y_fitted'], 'vr-')
+            # ax.plot(data.index, data['y_fitted'], 'vr-')
             # ax.plot(data.index, data['y_fitted_single'], '^g--')
             # ax.plot(data.index, data['y_fitted_multi'], 'xy--')
+            fig_3d_small = plt.figure()
+            ax_3d_small = fig_3d_small.add_subplot(111, projection='3d')
+            ax_3d_small.set_xlabel('PTT[s]')
+            ax_3d_small.set_ylabel('c/a')
+            ax_3d_small.set_zlabel('Systolic Blood Pressure[mmHg]')
 
-            ax.set_xlabel('')
-            ax.set_xticks([])
-            ax.set_xticklabels('')
-            ax.set_ylabel('')
-            ax.set_yticks([])
-            ax.set_yticklabels('')
             name = re.search('\d*', FILES_8[i]).group(0)
             logging.debug(name)
-            ax.legend([name], loc='upper right')
 
-            ax_3d.scatter(data.index, data['z'], data['y_fitted'], c='g')
-            ax_3d.scatter(data_measured.index, data_measured['z'], data_measured['y_fitted'], c='r')
+            ax_3d_small.set_title('Subject ' + name)
+            ax_3d_small.plot(data.index, data['z'], zs=data['y_fitted'], color='r', label='Calculated')
+            ax_3d_small.scatter(data_measured.index, data_measured['z'], data_measured['y_fitted'], color='b', label='Measured')
+            ax_3d_small.legend()
+            plt.savefig('./graphs_you_need/Subject' + name + '3d.png')
 
-            if i in [7, 18, 20]:
-                ax_3d.plot_wireframe(data.index, data['z'], data['y_fitted'], colors='g')
-                ax_3d.plot_wireframe(data_measured.index, data_measured['z'], data_measured['y_fitted'], colors='r')
+            # ax.set_xlabel('')
+            # ax.set_xticks([])
+            # ax.set_xticklabels('')
+            # ax.set_ylabel('')
+            # ax.set_yticks([])
+            # ax.set_yticklabels('')
+            # ax.legend([name], loc='upper right')
+
+            ax_3d.scatter(data.index, data['z'], data['y_fitted'], c='r')
+            ax_3d.scatter(data_measured.index, data_measured['z'], data_measured['y_fitted'], c='b')
+
+            if i in [7, 18]:
+                ax_3d.plot_wireframe(data.index, data['z'], data['y_fitted'], colors='g', label=('Subject ' + str(i)))
+                ax_3d.plot_wireframe(data_measured.index, data_measured['z'], data_measured['y_fitted'], colors='y')
         logging.debug(rmse_list)
         logging.debug(np.array(rmse_list).mean())
         # b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'alpha': alpha_list, 'RMSE': rmse_list})
         # b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
         # b1_b2_rmse_df.to_csv(DATA_DIR_9 + '/' + 'b1_b2_rmse_log_linear.csv')
+        ax_3d.legend()
 
         plt.subplots_adjust(wspace=0, hspace=0)
         plt.show()
         plt.savefig('ptt_with_blood_pressure_theoretical_by_multi_regression.png')
-        return data
+        logging.debug(statistical_data)
+        id = statistical_data['ID'].copy()
+        statistical_data = statistical_data.drop( statistical_data['ID'])
+        statistical_data = statistical_data.apply(lambda x: np.round(x, 2))
+        statistical_data.to_csv('./csvs_you_need/statistical_data_of_4d.csv')
+        return results
+
+
+
+
+    def get_theoretical_blood_pressure2():
+        b1_b2_theory = pd.read_csv('csvs_aaa/b1_b2_theory.csv')
+
+        file_count = len(FILES_8)
+
+        fig =  plt.figure(figsize=(15, 10))
+        fig_3d = plt.figure()
+        ax_3d = fig_3d.add_subplot(111, projection='3d')
+        ax_3d.set_xlabel('PTT[s]')
+        ax_3d.set_ylabel('c/a')
+        ax_3d.set_zlabel('Systolic Blood Pressure[mmHg]')
+        ax_3d.set_title('Measured(Blue) & Calculated(Red)' + '\n' + 'Blood Pressure')
+        fig_3d_2 = plt.figure()
+        ax_3d_2 = fig_3d_2.add_subplot(111, projection='3d')
+        ax_3d_2.set_xlabel('PTT[s]')
+        ax_3d_2.set_ylabel('c/a')
+        ax_3d_2.set_zlabel('Systolic Blood Pressure[mmHg]')
+        ax_3d_2.set_title('Measured(Blue) & Calculated(Red)' + '\n' + 'Blood Pressure')
+
+        big_ax = fig.add_subplot(111)
+        big_ax.set_title('Blood Pressure vs PTT')
+        big_ax.set_xlabel('PTT [s]', fontsize=9)
+        big_ax.set_ylabel('Blood Pressure [mmHg]')
+        big_ax.set_xticks([])
+        big_ax.set_yticks([])
+        big_ax.set_xticklabels('')
+        big_ax.set_yticklabels('')
+
+        rmse_list = []
+        id_list =[]
+        # statistical_data = pd.DataFrame(columns=['ID', 'RMSE', 'MSE', 'rsquared_adj', 'f_pvalue', 'params[const]', 'params[PTT]', 'params[PWA_C]', 'pvalues[const]', 'pvalues[PTT]', 'pvalues[PWA_C]'])
+
+        all_data = np.array([])
+        all_feature_data = pd.DataFrame(columns = ['PTT', PWA_C])
+        for i in np.arange(file_count):
+            if i in [4, 9, 12]:
+                continue
+            dr = DataReader(DATA_DIR_8, FILES_8[i])
+            data = dr.data.dropna()
+            np.append(all_data, data)
+            data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
+            all_feature_data = pd.concat([all_feature_data, data_blood_pressure_with_feature_and_ptt])
+
+
+        all_feature_data = pd.DataFrame(all_feature_data)
+        tbpg2 = TheoreticalBloodPressureGetter2(all_feature_data)
+        tbpg2.get_params()
+        params2, measured_blood_pressure2,theoretical_blood_pressure2, results= tbpg2.get_blood_pressure_by_multiple_linear_regression()
+        data_2 = pd.DataFrame({'x': params2[PTT], 'y_fitted': measured_blood_pressure2, 'z': params2[PWA_C]})
+        data_measured_2 = pd.DataFrame({'x': params2[PTT], 'y_fitted': theoretical_blood_pressure2, 'z': params2[PWA_C]})
+        data_2 = data_2.set_index(['x']).sort_index()
+        data_measured_2 = data_measured_2.set_index(['x']).sort_index()
+        ax_3d_2.scatter(data_2.index, data_2['z'], data_2['y_fitted'], c='r')
+        ax_3d_2.scatter(data_measured_2.index, data_measured_2['z'], data_measured_2['y_fitted'], c='b')
+
+
+        statistical_data = pd.DataFrame([{'ID': 100, 'RMSE': np.sqrt(results.mse_resid), 'rsquared_adj': results.rsquared_adj, 'f_pvalue': results.f_pvalue, 'params[const]': results.params[0], 'params[PTT]': results.params[1], 'params[PWA_C]': results.params[2], 'pvalues[const]': results.pvalues[0], 'pvalues[PTT]': results.pvalues[1], 'pvalues[PWA_C]': results.pvalues[2] }])
+        
+
+        for i in np.arange(file_count):
+            if i in [4, 9, 12]:
+                continue
+            data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
+            rmse_bp = np.sqrt(  ((results.params[0] + results.params[2] * data_blood_pressure_with_feature_and_ptt[PWA_C]+ results.params[1] * (1/data_blood_pressure_with_feature_and_ptt[PTT] ** 2) - data_blood_pressure_with_feature_and_ptt[BLOOD_PRESSURE]) ** 2).sum()  / (len(data_blood_pressure_with_feature_and_ptt) - 3))
+            rmse_list.append(rmse_bp)
+        pd.Series(rmse_list).to_csv('./csvs_you_need/rmse_list_of_3d_model.csv')
+
+
+
+        for i in np.arange(file_count):
+            if i in [4, 9, 12]:
+                continue
+            dr = DataReader(DATA_DIR_8, FILES_8[i]) 
+            data = dr.data.dropna()
+            # data_bp_pwf = pd.read_csv('./csvs_bp_pwf/{0}'.format(FILES_8[i]))
+            data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
+            tbpg2 = TheoreticalBloodPressureGetter2(data_blood_pressure_with_feature_and_ptt)
+            tbpg2.get_params()
+            params, measured_blood_pressure,theoretical_blood_pressure, results = tbpg2.get_blood_pressure_by_multiple_linear_regression()
+            x = data[PTT].values
+            y = data[BLOOD_PRESSURE].values
+
+            id = int(re.search('\d*', FILES_8[i]).group(0))
+            rmse_from_resid = np.sqrt(results.mse_resid)
+            statistical_data = pd.concat([statistical_data, pd.DataFrame([{'ID': id, 'RMSE': rmse_from_resid, 'rsquared_adj': results.rsquared_adj, 'f_pvalue': results.f_pvalue, 'params[const]': results.params[0], 'params[PTT]': results.params[1], 'params[PWA_C]': results.params[2], 'pvalues[const]': results.pvalues[0], 'pvalues[PTT]':results.pvalues[1], 'pvalues[PWA_C]':results.pvalues[2] }])])
+
+            # id_num = int(re.search('\d*', FILES_8[i]).group(0))
+            # b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
+
+            # b1 = b1_b2_theory_id['B1'].values[0]
+            # b2 = b1_b2_theory_id['B2'].values[0]
+            # b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
+            # b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
+            # b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
+            # b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
+
+            # y_fitted = b1 / x**2 + b2
+            # y_fitted_single = b1_single / x**2 + b2_single
+            # y_fitted_multi = b1_multi / x** 2 + b2_multi
+
+            # z = y - y_fitted
+            # z_single = y - y_fitted_single
+            # z_multi = y - y_fitted_multi
+
+            # rmse = np.sqrt((np.array(z) ** 2).sum() / (len(z)- 2))
+            # rmse_single = np.sqrt((np.array(z_single) ** 2).sum() / (len(z_single)- 2))
+            # rmse_multi = np.sqrt((np.array(z_multi) ** 2).sum() / (len(z_multi)- 2))
+
+            #logging.debug('RMSE {0}'.format(rmse))
+            #logging.debug('RMSE_SINGLE {0}'.format(rmse_single))
+            #logging.debug('RMSE_MULTI {0}'.format(rmse_multi))
+
+            # rmse_list.append(rmse)
+            id_list.append(re.search('\d*', FILES_8[i]).group(0))
+
+            logging.debug('start to plot {0}'.format(FILES_8[i]))
+
+            row = i / 4
+            column = i % 4
+            max_row = file_count / 4 + 1
+            # ax = fig.add_subplot(max_row, 4, i+1)
+            # dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            data_measured = pd.DataFrame({'x': params[PTT], 'y_fitted': measured_blood_pressure, 'z': params[PWA_C]})
+            data = pd.DataFrame({'x': params[PTT], 'y_fitted': theoretical_blood_pressure, 'z': params[PWA_C]})
+            data = data.set_index(['x']).sort_index()
+            data_measured = data_measured.set_index(['x']).sort_index()
+            logging.debug(data)
+
+            # ax.plot(data.index, data['y_fitted'], 'vr-')
+            # ax.plot(data.index, data['y_fitted_single'], '^g--')
+            # ax.plot(data.index, data['y_fitted_multi'], 'xy--')
+            fig_3d_small = plt.figure()
+            ax_3d_small = fig_3d_small.add_subplot(111, projection='3d')
+            ax_3d_small.set_xlabel('PTT[s]')
+            ax_3d_small.set_ylabel('c/a')
+            ax_3d_small.set_zlabel('Systolic Blood Pressure[mmHg]')
+
+            name = re.search('\d*', FILES_8[i]).group(0)
+            logging.debug(name)
+
+            ax_3d_small.set_title('Subject ' + name)
+            ax_3d_small.plot(data.index, data['z'], zs=data['y_fitted'], color='r', label='Calculated')
+            ax_3d_small.scatter(data_measured.index, data_measured['z'], data_measured['y_fitted'], color='b', label='Measured')
+            ax_3d_small.legend()
+            plt.savefig('./graphs_you_need/Subject' + name + '3d.png')
+
+            # ax.set_xlabel('')
+            # ax.set_xticks([])
+            # ax.set_xticklabels('')
+            # ax.set_ylabel('')
+            # ax.set_yticks([])
+            # ax.set_yticklabels('')
+            # ax.legend([name], loc='upper right')
+
+            ax_3d.scatter(data.index, data['z'], data['y_fitted'], c='r')
+            ax_3d.scatter(data_measured.index, data_measured['z'], data_measured['y_fitted'], c='b')
+
+            if i in [7, 18]:
+                ax_3d.plot_wireframe(data.index, data['z'], data['y_fitted'], colors='g', label=('Subject ' + str(i)))
+                ax_3d.plot_wireframe(data_measured.index, data_measured['z'], data_measured['y_fitted'], colors='y')
+        logging.debug(rmse_list)
+        logging.debug(np.array(rmse_list).mean())
+        # b1_b2_rmse_df = pd.DataFrame({'ID': id_list, 'B1': b1_list, 'B2': b2_list, 'alpha': alpha_list, 'RMSE': rmse_list})
+        # b1_b2_rmse_df = b1_b2_rmse_df.set_index(['ID'])
+        # b1_b2_rmse_df.to_csv(DATA_DIR_9 + '/' + 'b1_b2_rmse_log_linear.csv')
+        ax_3d.legend()
+
+        plt.subplots_adjust(wspace=0, hspace=0)
+        plt.show()
+        plt.savefig('ptt_with_blood_pressure_theoretical_by_multi_regression.png')
+        logging.debug(statistical_data)
+        id = statistical_data['ID'].copy()
+        statistical_data = statistical_data.drop( statistical_data['ID'])
+        statistical_data = statistical_data.apply(lambda x: np.round(x, 2))
+        statistical_data.to_csv('./csvs_you_need/statistical_data_of_4d.csv')
+        logging.debug(rmse_list)
+        return results
+
+    def get_rmses_bars():
+        df = pd.read_csv('./csvs_you_need/rmses_with_all_data_average.csv')
+        df.columns = ['ID', 'Expected', 'Multi', 'Single', 'New Method', 'New Method Calc']
+
+        fig = plt.figure()
+        df.plot(kind='bar', x=df['ID'])
+        plt.xlabel('Subject Number')
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/all.png')
+
+        fig = plt.figure()
+        df[['Expected']].plot(kind='bar', x=df['ID'])
+        plt.xlabel('Subject Number')
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/first.png')
+
+        df[['Expected', 'Single', 'Multi']].plot(kind='bar', x=df['ID'])
+        plt.xlabel('Subject Number')
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/second.png')
+
+        df[['Expected', 'New Method', 'New Method Calc']].plot(kind='bar', x=df['ID'])
+        plt.xlabel('Subject Number')
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/third.png')
+
+        df[['Expected', 'New Method', 'New Method Calc']].plot(kind='bar', x=df['ID'])
+        plt.xlabel('Subject Number')
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/third.png')
+
 
 
 
@@ -1776,11 +2128,12 @@ if __name__ == '__main__':
     # x = fr.get_static_pulse_wave_feature()
     # fr.create_csv()
     # FeatureBloodPressureRegression().run()
-    # tbbg = TheoreticalB1B2Getter()
-    # tbbg.get_params()
-    # tbbg.get_theoretical_b1_b2()
+    tbbg = TheoreticalB1B2Getter()
+    tbbg.get_params()
+    tbbg.get_theoretical_b1_b2()
     # get_theoretical_blood_pressure()
-    x = get_theoretical_blood_pressure2()
+    # x = get_theoretical_blood_pressure2()
+    # get_rmses_bars()
 
 
     # mp = ModelPlotter()
