@@ -901,6 +901,8 @@ class TheoreticalB1B2Getter:
         b1_model = sm.OLS(b1_y, b1_X)
         b1_results = b1_model.fit()
         logging.debug('b1-single-summary: {0}'.format(b1_results.summary()))
+        logging.debug(b1_results.pvalues)
+        logging.debug(b1_results.params)
 
         b2_x = self.data[self.b2_primary_param].drop(self.drop_list)
         b2_y = self.data['B2'].drop(self.drop_list)
@@ -908,6 +910,8 @@ class TheoreticalB1B2Getter:
         b2_model = sm.OLS(b2_y, b2_X)
         b2_results = b2_model.fit()
         logging.debug('b2-single-summary: {0}'.format(b2_results.summary()))
+        logging.debug(b2_results.pvalues)
+        logging.debug(b2_results.params)
 
         b1_1, b1_2 = b1_results.params
         b2_1, b2_2 = b2_results.params
@@ -926,6 +930,8 @@ class TheoreticalB1B2Getter:
         b1_model_multi = sm.OLS(b1_y, b1_X_multi)
         b1_results_multi = b1_model_multi.fit()
         logging.debug('b1-multi-summary: {0}'.format(b1_results_multi.summary()))
+        logging.debug(b1_results_multi.pvalues)
+        logging.debug(b1_results_multi.params)
 
         b2_x_multi = self.data[[self.b2_primary_param, self.b2_secondary_param]].drop(self.drop_list)
         # b2_x_multi[self.b2_secondary_param] = b2_x_multi[self.b2_secondary_param]
@@ -933,6 +939,8 @@ class TheoreticalB1B2Getter:
         b2_model_multi = sm.OLS(b2_y, b2_X_multi)
         b2_results_multi = b2_model_multi.fit()
         logging.debug('b2-multi-summary: {0}'.format(b2_results_multi.summary()))
+        logging.debug(b2_results_multi.pvalues)
+        logging.debug(b2_results_multi.params)
         b1_multi = b1_results_multi.predict()
         b2_multi = b2_results_multi.predict()
         for i in self.drop_list:
@@ -2128,9 +2136,9 @@ if __name__ == '__main__':
     # x = fr.get_static_pulse_wave_feature()
     # fr.create_csv()
     # FeatureBloodPressureRegression().run()
-    tbbg = TheoreticalB1B2Getter()
-    tbbg.get_params()
-    tbbg.get_theoretical_b1_b2()
+    # tbbg = TheoreticalB1B2Getter()
+    # tbbg.get_params()
+    # tbbg.get_theoretical_b1_b2()
     # get_theoretical_blood_pressure()
     # x = get_theoretical_blood_pressure2()
     # get_rmses_bars()
