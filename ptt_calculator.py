@@ -145,10 +145,12 @@ TIME_E = 'TIME(e/a)'
 K_VALUE = 'K-Value'
 AGING_INDEX = 'AgingIndex'
 AUGMENTATION_INDEX = 'AI'
+
 # Logger setting
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 # logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
 # matplotlib pandas setting
 pd.options.display.mpl_style = 'default'
 
@@ -186,12 +188,6 @@ class CSVReader:
         self.start_datetime = start_datetime
         return start_datetime
 
-    # def get_total_sample_num(self):
-    #     pls_raw = pd.read_csv(self.data_dir + '/' + self.pls_file)
-    #     # total_sample_num = pls_raw.iloc[[2][1])
-    #     total_sample_num = self.pls_raw.shape[0]
-    #     self.total_sample_num = total_sample_num
-    #     return total_sample_num
 
 class ConcatenatedDataGetter:
     def __init__(self, filename, data_dir=DATA_DIR_3):
@@ -225,9 +221,6 @@ class DataFrameController:
     def create_datetime(self):
         logging.debug('create datetime columns')
         date_range = pd.date_range(self.csv_reader_object.start_datetime, periods=self.dataframe.shape[0], freq='ms')
-        # date_range_series = pd.Series(date_range, name=DATETIME)
-        # df = pd.concat([self.dataframe, date_range_series], axis=1, ignore_index=True)
-        # self.dataframe = df
         self.dataframe.index = date_range
         return self.dataframe
 
@@ -257,9 +250,6 @@ class DataFrameController2:
         logging.debug('create datetime columns')
         logging.debug(self.csv_reader_object_0.start_datetime)
         date_range = pd.date_range(self.csv_reader_object_0.start_datetime, periods=self.big_dataframe.shape[0], freq='ms')
-        # date_range_series = pd.Series(date_range, name=DATETIME)
-        # df = pd.concat([self.dataframe, date_range_series], axis=1, ignore_index=True)
-        # self.dataframe = df
         self.big_dataframe.index = date_range
         return self.big_dataframe
 
@@ -278,7 +268,6 @@ class CutByTimeController:
         ketsuatsu[TIME] = date_string + ' ' + ketsuatsu[TIME]
         start_time_index = ketsuatsu[TIME].iloc[0]
         end_time_index = ketsuatsu[TIME].iloc[-1]
-        # ketsuatsu.index = pd.DatetimeIndex(ketsuatsu[TIME])
         logging.debug('index: {0}'.format(start_time_index))
         logging.debug('index: {0}'.format(end_time_index))
         start_time = pd.to_datetime(start_time_index) - pd.tseries.offsets.Second(OFFSET_OF_MESUREMENT_TIME)
@@ -342,8 +331,6 @@ class RealTimeDrawer:
                 self.data[PLS_MIN].iloc[ i*TIME_RANGE:(i+1)*TIME_RANGE].plot(ax=ax, marker='o')
 
             plt.draw()
-            # if i == 1:
-            #     plt.savefig(filename= DATA_DIR + 'sample.png')
             plt.pause(PAUSE_TIME)
         return
 
@@ -385,6 +372,7 @@ class NoiseCanceler:
         PLS_STOP_FREQUENCY = PLS_CUTOFF_FREQUENCY
         gpass = 3
         gstop = 40
+
         # normalize
         wp = PASS_FREQUENCY / NYQUIST_FREQUENCY
         wp_ecg = ECG_STOP_FREQUENCY / NYQUIST_FREQUENCY
@@ -393,9 +381,11 @@ class NoiseCanceler:
         ws_ecg = (ECG_STOP_FREQUENCY + 1) / NYQUIST_FREQUENCY
         ws_pls = (PLS_STOP_FREQUENCY + 1) / NYQUIST_FREQUENCY
         n1, wn1 = signal.buttord([wp, wp_ecg], [ws, ws_ecg], gpass, gstop)
+
         # b1, a1 = signal.butter(n1, wn1, 'bandpass')
         b1, a1 = signal.butter(1, [wp, wp_ecg], btype='bandpass')
         n2, wn2 = signal.buttord([wp, wp_pls], [ws, ws_pls], gpass, gstop)
+
         # b2, a2 = signal.butter(n2, wn2, 'bandpass')
         b2, a2 = signal.butter(1, [wp, wp_pls], btype='bandpass')
         data1 = self.data[ECG].values
@@ -550,16 +540,11 @@ class PTTCalculator:
         ptt_calculator['PTT(calculater-diff)'] = ptt_calculator['PTT(calculater)'].diff()
 
         ptt_calculator.index = np.arange(ptt_calculator_len)
-        # ptt_calculator_diff = ptt_calculator['PTT(calculater)'][1:].values - ptt_calculator['PTT(calculater)'][:-1].values
-        # logging.debug(len(ptt_calculator_diff))
-        # logging.debug(len(ptt_calculator[1:]))
-        # ptt_calculator['PTT(calculater)'][1:] = ptt_calculator_diff
 
         ptt_calculator_eq_1_index = ptt_calculator[ptt_calculator['PTT(calculater-diff)'] == 1].index.values
         ptt_calculator_eq_0_index = ptt_calculator_eq_1_index - 1
         ptt_calculator[PTT] = np.nan
         ptt_calculator[PTT][ptt_calculator_eq_1_index] = ptt_calculator['PTT(TIME)'][ptt_calculator_eq_1_index].values - ptt_calculator['PTT(TIME)'][ptt_calculator_eq_0_index].values
-        # ptt_calculator.index = pd.Index(ptt_calculator['PTT(TIME)'])
         ptt_calculator.index = ptt_calculator['PTT(TIME)']
         not_null_ptt = ptt_calculator[PTT][ptt_calculator[PTT].notnull()]
         logging.debug('------------------\n')
@@ -570,9 +555,6 @@ class PTTCalculator:
         logging.debug('------------------\n')
         logging.debug(ptt_sec)
         logging.debug('------------------\n')
-        # ptt_milli = ptt_calculator[PTT].dt.components.milliseconds / 1000
-        # ptt_calculator[PTT] = ptt_sec
-        # self.data[PTT] = ptt_calculator[PTT]
         logging.debug('------------------\n')
         logging.debug(type(self.data.index))
         logging.debug(type(ptt_sec.index))
@@ -585,13 +567,6 @@ class PTTCalculator:
         logging.debug('------------------\n')
         self.data[PTT] = ptt_sec
 
-        # ptt_calculator['PTT(TIME)'] = pd.to_datetime(ptt_calculator.index)
-        # ptt_calculator[PTT] = np.NaN
-        # ptt_calculator[PTT][1:] = ptt_calculator['PTT(TIME)'][1:].values - ptt_calculator['PTT(TIME)'][:-1].values
-        # self.data[PTT] = ptt_calculator[PTT]
-        # x = self.data[PTT]
-        # xxx = x[x.notnull()]
-        # self.data[PTT] = xxx.dt.components.milliseconds / 1001
         # 0.01 < PTT < 0.2 のものは理論上不可能なので
         self.data[PTT] = self.data[PTT][self.data[PTT] < 0.2]
         self.data[PTT] = self.data[PTT][self.data[PTT] > 0.01]
@@ -617,7 +592,7 @@ class CuffDataCleaner:
     def clean(self):
         self.data[((self.data - self.data[0:2].min()) > 50) & ((np.abs(self.data.diff()) > 50) | (np.abs(self.data.diff(2)) > 50))] = np.nan
         self.data[((self.data - self.data[0:2].min()) < -10) & (np.abs(self.data.diff()) > 10)] = np.nan
-        # TODO 松浦のスチューデント化残差を用いた外れ値処理が素晴らしいので実装したい
+        # TODO 松浦のスチューデント化残差を用いた外れ値処理が素晴らしいので実装したい -> 線形に関して実装済み
 
     def create_csv(self, filename='default.csv'):
         length = len(KETSUATSU_FILES)
@@ -648,24 +623,17 @@ class PulseWaveFeatureGetter:
         
         self.data[PULSE_WAVE_VELOCITY] = self.data[PLS_NORMALIZED].diff()
         self.data[PULSE_WAVE_ACCELATION] = self.data[PULSE_WAVE_VELOCITY].diff()
-        # self.data = self.data.set_index([np.arange(len(self.data)), pd.to_datetime(self.data.index)])
         self.data.index = pd.to_datetime(self.data.index)
         self.data['ID'] = np.arange(len(self.data))
-        # self.data.index.names = ['position', 'date']
         argrelmax_points_index = signal.argrelmax(self.data[PULSE_WAVE_ACCELATION].values)
         argrelmin_points_index = signal.argrelmin(self.data[PULSE_WAVE_ACCELATION].values)
 
         ptt_calculator = PTTCalculator(self.data)
         ptt_calculator.get_ecg_max_index()
         ptt_calculator.get_pls_min_index()
-        # ptt_calculator.get_ptt()
         self.data[ECG_MAX] = ptt_calculator.data[ECG_MAX]
         self.data[PLS_MIN] = ptt_calculator.data[PLS_MIN]
         self.data[PLS_MAX] = ptt_calculator.data[PLS_MAX]
-
-        # pls_min_points_index = self.data[PLS_MIN].dropna().index.get_level_values('position')
-        # logging.debug(pls_min_points_index)
-        # self.data[PTT] = ptt_calculator.data[PTT]
 
         # get ketsuatsu files
         self.ketsuatsu.index = pd.to_datetime(self.ketsuatsu.index)
@@ -688,11 +656,9 @@ class PulseWaveFeatureGetter:
 
             logging.debug('start {0}'.format(datetime_index))
             sec = pd.tseries.offsets.Second(30)
-            # ecg_maxes_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[ECG_MAX].notnull()]
             pls_mines_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[PLS_MIN].notnull()]
             pls_maxes_of_ketsuatsu_window = self.data[(datetime_index - sec):datetime_index][self.data[PLS_MAX].notnull()]
             
-            # logging.debug(ecg_maxes_of_ketsuatsu_window)
             logging.debug(pls_mines_of_ketsuatsu_window)
             logging.debug(pls_maxes_of_ketsuatsu_window)
             b_a_list = []
@@ -808,8 +774,6 @@ class PulseWaveFeatureGetter:
 
     def create_csv(self, filename='default.csv'):
         length = len(NORMALIZED_FILES)
-        # for i in np.arange(length):
-        #     self.data.to_csv(DATA_DIR_6 + '/' + filename)
         self.ketsuatsu.to_csv(DATA_DIR_6 + '/' + filename)
 
 class FeatureRegression:
@@ -854,7 +818,6 @@ class FeatureBloodPressureRegression:
         x_data = pd.read_csv(DATA_DIR_6 + '/' + FILES_6[0])
         self.df_bp = pd.DataFrame(index=x_data.columns)
         self.df_ptt = pd.DataFrame(index=x_data.columns)
-        # self.df_bp = self.df.fillna(0)
         print 'here'
 
     def run(self):
@@ -934,7 +897,6 @@ class TheoreticalB1B2Getter:
         logging.debug(b1_results_multi.params)
 
         b2_x_multi = self.data[[self.b2_primary_param, self.b2_secondary_param]].drop(self.drop_list)
-        # b2_x_multi[self.b2_secondary_param] = b2_x_multi[self.b2_secondary_param]
         b2_X_multi = sm.add_constant(b2_x_multi)
         b2_model_multi = sm.OLS(b2_y, b2_X_multi)
         b2_results_multi = b2_model_multi.fit()
@@ -1085,10 +1047,6 @@ class ModelPlotter:
 
         logging.debug(len(z_line))
 
-        # z_scatter = np.array([func(x, y) for y in np.ravel(Y)])
-        # z_scatter = np.array([b1 / x ** 2 + y for x, y in zip(f1_y, f1_y)])
-        # sbp = z_scatter.reshape(ptt.shape)
-        # ax.scatter(f1_y, f1_y, z_scatter)
         ax.plot_wireframe(X, Y, Z, color='gray')
         ax.plot(x_line, y_line, z_line ,color='b', linewidth=3, label='Subject')
         ax.set_xlabel('PTT [s]')
@@ -1179,14 +1137,14 @@ if __name__ == '__main__':
             nc.cancel_noise_2()
             nc.create_csv(file)
 
-    # def create_noise_removed_files_2():
-    #     for file in WO_NOISE_FILES:
-    #         logging.debug('creating highpassed {0}'.format(file))
-    #         dr = DataReader(DATA_DIR_4_2, file)
-    #         nc = NoiseCanceler(dr.data)
-    #         nc.cancel_noise()
-    #         nc.cancel_noise_2()
-    #         nc.create_csv(file)
+    def create_noise_removed_files_2():
+        for file in WO_NOISE_FILES:
+            logging.debug('creating highpassed {0}'.format(file))
+            dr = DataReader(DATA_DIR_4_2, file)
+            nc = NoiseCanceler(dr.data)
+            nc.cancel_noise()
+            nc.cancel_noise_2()
+            nc.create_csv(file)
 
     def normalize_files():
         for file in WO_NOISE_FILES:
@@ -1239,7 +1197,6 @@ if __name__ == '__main__':
             pc.get_ecg_max_index()
             pc.get_ptt()
             pc.create_csv(file)
-            # pc.draw_now()
 
     def plot_ptt_with_time():
         file_count = len(FILES_7)
@@ -1264,7 +1221,6 @@ if __name__ == '__main__':
             ax.set_xlabel('')
             ax.set_xticks([])
             ax.set_xticklabels('')
-            # name = FILES_7[i].replace('.csv', '')
             name = re.search('\d*', FILES_7[i]).group(0)
             logging.debug(name)
             ax.legend([name], loc='upper right')
@@ -1287,22 +1243,18 @@ if __name__ == '__main__':
             date_string = pd.to_datetime(ptt.data.index[0]).strftime('%Y-%m-%d')
             na_dropped_ptt = ptt.data.dropna()
             na_dropped_ptt.index = pd.DatetimeIndex(na_dropped_ptt.index)
-            # resampled_ptt = na_dropped_ptt.resample('s', how='mean')
             ketsuatsu = pd.read_csv(KETSUATSU_DIR + '/' + filename, header=None)
             ketsuatsu.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW]
             ketsuatsu[TIME] = date_string + ' ' + ketsuatsu[TIME]
             ketsuatsu.index = pd.DatetimeIndex(ketsuatsu[TIME])
             ptt_list = []
             for datetime_index in ketsuatsu.index:
-                # sec = pd.tseries.offsets.Second(2)
                 sec = pd.tseries.offsets.Second(30)
                 # PTTは血圧測定時の-30secのmedian, 日高、松浦論文にもあるが中央値はノイズに対する
                 # 堅牢性が高いため
                 ptt = na_dropped_ptt[(datetime_index - sec):(datetime_index)].median()[0]
                 logging.debug(ptt)
                 ptt_list.append(ptt)
-            # ketsuatsu_ptt = pd.concat([ketsuatsu, resampled_ptt], axis=1, join='inner')
-            # ketsuatsu_ptt.columns = [TIME, BLOOD_PRESSURE, BLOOD_PRESSURE_LOW, PTT]
             ketsuatsu[PTT] = ptt_list
             # 単回帰によるcleaning 内部はstudent残差を用いているstudent残差が0.05以下は除外
             ketsuatsu = ketsuatsu.dropna()
@@ -1373,8 +1325,7 @@ if __name__ == '__main__':
             column = i % 4
             max_row = file_count / 4 + 1
             ax = fig.add_subplot(max_row, 4, i+1)
-            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
-            # , xlim=(0.05, 0.18), ylim=(95, 270))
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) 
             ax.plot(x, fitx(x), 'vr-')
             ax.set_xlabel('')
             ax.set_xticks([])
@@ -1382,7 +1333,6 @@ if __name__ == '__main__':
             ax.set_ylabel('')
             ax.set_yticks([])
             ax.set_yticklabels('')
-            # name = FILES_8[i].replace('.csv', '')
             name = re.search('\d*', FILES_8[i]).group(0)
             logging.debug(name)
             ax.legend([name], loc='upper right')
@@ -1454,7 +1404,7 @@ if __name__ == '__main__':
             column = i % 4
             max_row = file_count / 4 + 1
             ax = fig.add_subplot(max_row, 4, i+1)
-            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) 
             data = pd.DataFrame({'x': x, 'y_fitted': y_fitted})
             data = data.set_index(['x']).sort_index()
             logging.debug(data)
@@ -1543,7 +1493,7 @@ if __name__ == '__main__':
             column = i % 4
             max_row = file_count / 4 + 1
             ax = fig.add_subplot(max_row, 4, i+1)
-            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) 
             data = pd.DataFrame({'x': x, 'y_fitted': y_fitted})
             data = data.set_index(['x']).sort_index()
             logging.debug(data)
@@ -1567,11 +1517,6 @@ if __name__ == '__main__':
         plt.show()
         plt.savefig('ptt_with_blood_pressure_fitted_b1_b2_with_log_linear.png')
         return b1_b2_rmse_df
-
-    def get_b1_b2_with_student_residual():
-        print 'here'
-
-
 
     def get_wave_form_features():
         length = len(NORMALIZED_FILES)
@@ -1682,7 +1627,6 @@ if __name__ == '__main__':
             max_row = file_count / 4 + 1
             ax = fig.add_subplot(max_row, 4, i+1)
             logging.debug(dr.data.dropna())
-            # dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax, legend=True) # , sharex=True, sharey=True)
             data = pd.DataFrame({'x': x, 'y_fitted': y_fitted, 'y_fitted_single': y_fitted_single, 'y_fitted_multi': y_fitted_multi})
             data = data.set_index(['x']).sort_index()
             logging.debug(data)
@@ -1707,7 +1651,7 @@ if __name__ == '__main__':
             logging.debug('---------------------')
             logging.debug(data)
             logging.debug('---------------------')
-            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax_big, c='b', legend=True, label='Measured') # , sharex=True, sharey=True)
+            dr.data.dropna().plot(kind='scatter', x=PTT, y=BLOOD_PRESSURE, ax=ax_big, c='b', legend=True, label='Measured')
             ax_big.plot(data.index, data['y_fitted'],  'kv--', label='Expected')
             ax_big.plot(data.index, data['y_fitted_single'],'r^-', label='Single Regression')
             ax_big.plot(data.index, data['y_fitted_multi'], 'gx-', label='Multi Regression')
@@ -1764,7 +1708,6 @@ if __name__ == '__main__':
 
         rmse_list = []
         id_list =[]
-        # statistical_data = pd.DataFrame(columns=['ID', 'RMSE', 'MSE', 'rsquared_adj', 'f_pvalue', 'params[const]', 'params[PTT]', 'params[PWA_C]', 'pvalues[const]', 'pvalues[PTT]', 'pvalues[PWA_C]'])
 
         all_data = np.array([])
         all_feature_data = pd.DataFrame(columns = ['PTT', PWA_C])
@@ -1808,33 +1751,6 @@ if __name__ == '__main__':
             rmse_from_resid = np.sqrt(results.mse_resid)
             statistical_data = pd.concat([statistical_data, pd.DataFrame([{'ID': id, 'RMSE': rmse_from_resid, 'rsquared_adj': results.rsquared_adj, 'f_pvalue': results.f_pvalue, 'params[const]': results.params[0], 'params[PTT]': results.params[1], 'params[PWA_C]': results.params[2], 'pvalues[const]': results.pvalues[0], 'pvalues[PTT]':results.pvalues[1], 'pvalues[PWA_C]':results.pvalues[2] }])])
 
-            # id_num = int(re.search('\d*', FILES_8[i]).group(0))
-            # b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
-
-            # b1 = b1_b2_theory_id['B1'].values[0]
-            # b2 = b1_b2_theory_id['B2'].values[0]
-            # b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
-            # b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
-            # b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
-            # b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
-
-            # y_fitted = b1 / x**2 + b2
-            # y_fitted_single = b1_single / x**2 + b2_single
-            # y_fitted_multi = b1_multi / x** 2 + b2_multi
-
-            # z = y - y_fitted
-            # z_single = y - y_fitted_single
-            # z_multi = y - y_fitted_multi
-
-            # rmse = np.sqrt((np.array(z) ** 2).sum() / (len(z)- 2))
-            # rmse_single = np.sqrt((np.array(z_single) ** 2).sum() / (len(z_single)- 2))
-            # rmse_multi = np.sqrt((np.array(z_multi) ** 2).sum() / (len(z_multi)- 2))
-
-            #logging.debug('RMSE {0}'.format(rmse))
-            #logging.debug('RMSE_SINGLE {0}'.format(rmse_single))
-            #logging.debug('RMSE_MULTI {0}'.format(rmse_multi))
-
-            # rmse_list.append(rmse)
             id_list.append(re.search('\d*', FILES_8[i]).group(0))
 
             logging.debug('start to plot {0}'.format(FILES_8[i]))
@@ -1932,7 +1848,6 @@ if __name__ == '__main__':
 
         rmse_list = []
         id_list =[]
-        # statistical_data = pd.DataFrame(columns=['ID', 'RMSE', 'MSE', 'rsquared_adj', 'f_pvalue', 'params[const]', 'params[PTT]', 'params[PWA_C]', 'pvalues[const]', 'pvalues[PTT]', 'pvalues[PWA_C]'])
 
         all_data = np.array([])
         all_feature_data = pd.DataFrame(columns = ['PTT', PWA_C])
@@ -1976,7 +1891,6 @@ if __name__ == '__main__':
                 continue
             dr = DataReader(DATA_DIR_8, FILES_8[i]) 
             data = dr.data.dropna()
-            # data_bp_pwf = pd.read_csv('./csvs_bp_pwf/{0}'.format(FILES_8[i]))
             data_blood_pressure_with_feature_and_ptt = pd.read_csv('./csvs_ecg_max_pls_min_ptt_pulse_wave_features/{0}'.format(FILES_8[i]))
             tbpg2 = TheoreticalBloodPressureGetter2(data_blood_pressure_with_feature_and_ptt)
             tbpg2.get_params()
@@ -1988,33 +1902,6 @@ if __name__ == '__main__':
             rmse_from_resid = np.sqrt(results.mse_resid)
             statistical_data = pd.concat([statistical_data, pd.DataFrame([{'ID': id, 'RMSE': rmse_from_resid, 'rsquared_adj': results.rsquared_adj, 'f_pvalue': results.f_pvalue, 'params[const]': results.params[0], 'params[PTT]': results.params[1], 'params[PWA_C]': results.params[2], 'pvalues[const]': results.pvalues[0], 'pvalues[PTT]':results.pvalues[1], 'pvalues[PWA_C]':results.pvalues[2] }])])
 
-            # id_num = int(re.search('\d*', FILES_8[i]).group(0))
-            # b1_b2_theory_id = b1_b2_theory[b1_b2_theory['ID'] == id_num]
-
-            # b1 = b1_b2_theory_id['B1'].values[0]
-            # b2 = b1_b2_theory_id['B2'].values[0]
-            # b1_single = b1_b2_theory_id['B1(theory-single)'].values[0]
-            # b2_single = b1_b2_theory_id['B2(theory-single)'].values[0]
-            # b1_multi = b1_b2_theory_id['B1(theory-multi)'].values[0]
-            # b2_multi = b1_b2_theory_id['B2(theory-multi)'].values[0]
-
-            # y_fitted = b1 / x**2 + b2
-            # y_fitted_single = b1_single / x**2 + b2_single
-            # y_fitted_multi = b1_multi / x** 2 + b2_multi
-
-            # z = y - y_fitted
-            # z_single = y - y_fitted_single
-            # z_multi = y - y_fitted_multi
-
-            # rmse = np.sqrt((np.array(z) ** 2).sum() / (len(z)- 2))
-            # rmse_single = np.sqrt((np.array(z_single) ** 2).sum() / (len(z_single)- 2))
-            # rmse_multi = np.sqrt((np.array(z_multi) ** 2).sum() / (len(z_multi)- 2))
-
-            #logging.debug('RMSE {0}'.format(rmse))
-            #logging.debug('RMSE_SINGLE {0}'.format(rmse_single))
-            #logging.debug('RMSE_MULTI {0}'.format(rmse_multi))
-
-            # rmse_list.append(rmse)
             id_list.append(re.search('\d*', FILES_8[i]).group(0))
 
             logging.debug('start to plot {0}'.format(FILES_8[i]))
@@ -2084,75 +1971,92 @@ if __name__ == '__main__':
         df = pd.read_csv('./csvs_you_need/rmses_with_all_data_average.csv')
         df.columns = ['ID', 'Expected', 'Multi', 'Single', 'New Method', 'New Method Calc']
 
-        fig = plt.figure()
+        # fig, ax =  plt.subplots(figsize=(12, 5))
         df.plot(kind='bar', x=df['ID'])
-        plt.xlabel('Subject Number')
         plt.ylabel('RMSE [mmHg]')
+        plt.legend(prop={'size':9})
         plt.savefig('./graphs_you_need/all.png')
+
+        df[df['ID'] == 'MEAN'].plot(kind='bar')
+        plt.xticks([])
+        plt.xlabel('MEAN')
+        plt.ylabel('RMSE [mmHg]')
+        plt.legend(prop={'size':7.5})
+        plt.savefig('./graphs_you_need/all_mean.png')
 
         fig = plt.figure()
         df[['Expected']].plot(kind='bar', x=df['ID'])
-        plt.xlabel('Subject Number')
         plt.ylabel('RMSE [mmHg]')
         plt.savefig('./graphs_you_need/first.png')
 
         df[['Expected', 'Single', 'Multi']].plot(kind='bar', x=df['ID'])
-        plt.xlabel('Subject Number')
         plt.ylabel('RMSE [mmHg]')
         plt.savefig('./graphs_you_need/second.png')
 
+        df[['Expected', 'Single', 'Multi']][df['ID'] == 'MEAN'].plot(kind='bar')
+        plt.xticks([])
+        plt.xlabel('MEAN')
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/second_mean.png')
+
+        df[['Expected', 'New Method']].plot(kind='bar', x=df['ID'])
+        plt.ylabel('RMSE [mmHg]')
+        plt.savefig('./graphs_you_need/third_zero.png')
+
         df[['Expected', 'New Method', 'New Method Calc']].plot(kind='bar', x=df['ID'])
-        plt.xlabel('Subject Number')
         plt.ylabel('RMSE [mmHg]')
         plt.savefig('./graphs_you_need/third.png')
 
-        df[['Expected', 'New Method', 'New Method Calc']].plot(kind='bar', x=df['ID'])
-        plt.xlabel('Subject Number')
+        df[['Expected', 'New Method', 'New Method Calc']][df['ID'] == 'MEAN'].plot(kind='bar')
+        plt.xticks([])
+        plt.xlabel('MEAN')
         plt.ylabel('RMSE [mmHg]')
-        plt.savefig('./graphs_you_need/third.png')
+        plt.savefig('./graphs_you_need/third_mean.png')
 
 
 
 
-    # # in sequence, it is supposed that p0 and p1 file exist which means 
-    # # data over 31 minutes and under 60 minutes
-    # # so this case one file under 30 minutes is eliminated
-    # simulate_raw_files()
-    # concat_p0_and_p1_to_csv()
-    # create_cut_by_time_files()
-    # create_noise_removed_files()
-    # normalize_files()
-    # create_ptt_files()
-    # plot_ptt_with_time()
-    # clean_cuff_data()
-    # ketsuatsu = get_ketsuatsu_and_ptt()
+    # in sequence, it is supposed that p0 and p1 file exist which means 
+    # data over 31 minutes and under 60 minutes
+    # so this case one file under 30 minutes is eliminated
+    simulate_raw_files()
+    concat_p0_and_p1_to_csv()
+    create_cut_by_time_files()
+    create_noise_removed_files()
+    normalize_files()
+    create_ptt_files()
+    plot_ptt_with_time()
+    clean_cuff_data()
+    ketsuatsu = get_ketsuatsu_and_ptt()
 
-    # y = plot_ketsuatsu_and_ptt()
-    # z = get_b1_and_b2()
-    # y = get_b1_and_b2_by_log_linear()
+    x = plot_ketsuatsu_and_ptt()
+    x = get_b1_and_b2()
+    x = get_b1_and_b2_by_log_linear()
 
-    # x = get_wave_form_features()
-    # fr = FeatureRegression()
-    # x = fr.get_static_pulse_wave_feature()
-    # fr.create_csv()
-    # FeatureBloodPressureRegression().run()
-    # tbbg = TheoreticalB1B2Getter()
-    # tbbg.get_params()
-    # tbbg.get_theoretical_b1_b2()
-    # get_theoretical_blood_pressure()
-    # x = get_theoretical_blood_pressure2()
-    # get_rmses_bars()
+    x = get_wave_form_features()
+    fr = FeatureRegression()
+    x = fr.get_static_pulse_wave_feature()
+    fr.create_csv()
+    FeatureBloodPressureRegression().run()
+    tbbg = TheoreticalB1B2Getter()
+    tbbg.get_params()
+    tbbg.get_theoretical_b1_b2()
+    get_theoretical_blood_pressure()
+    x = get_theoretical_blood_pressure2()
+    get_rmses_bars()
 
-
-    # mp = ModelPlotter()
-    # mp.get_f1_f2_f3_graph()
-    # mp.get_bp_ptt_f_graph()
+    
+    # blood pressure model plotter
+    mp = ModelPlotter()
+    mp.get_f1_f2_f3_graph()
+    mp.get_bp_ptt_f_graph()
     
 
+    blood pressure simulator
 
-    # simulate_normalized_files()
-    # simulate_ptt_calculator()
-
-    # plot_ptt_with_time()
-    # simulate_one_ptt_calculator()
-    # zzz = DataReader(KETSUATSU_PTT_DIR, KETSUATSU_PTT_FILES[0])
+    simulate_normalized_files()
+    simulate_ptt_calculator()
+    
+    plot_ptt_with_time()
+    simulate_one_ptt_calculator()
+    x = DataReader(KETSUATSU_PTT_DIR, KETSUATSU_PTT_FILES[0])
